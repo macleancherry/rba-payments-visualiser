@@ -140,6 +140,53 @@ function App() {
   const [nlAnswerLoading, setNlAnswerLoading] = useState(false);
   const [isChartFullscreen, setIsChartFullscreen] = useState(false);
 
+  const [trendInsight, setTrendInsight] = useState<string | null>(null);
+  const [trendInsightLoading, setTrendInsightLoading] = useState(false);
+  const [volumeInsight, setVolumeInsight] = useState<string | null>(null);
+  const [volumeInsightLoading, setVolumeInsightLoading] = useState(false);
+
+  const generateChartInsights = async (series: PaymentSeries[], timelineData: Array<Record<string, number | string | null>>) => {
+    if (!series.length || !timelineData.length) return;
+
+    setTrendInsightLoading(true);
+    setVolumeInsightLoading(true);
+
+    try {
+      const seriesInfo = series
+        .slice(0, 4)
+        .map((s) => ({ title: s.title, units: s.units }));
+
+      const recentPoints = timelineData.slice(-6);
+      const insight = await fetch('/api/answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: `Generate a brief one-sentence insight about the trend shown in this data: ${JSON.stringify(
+            seriesInfo,
+          )}. Data points: ${JSON.stringify(recentPoints)}. Be specific and analytical.`,
+          series: series
+            .slice(0, 2)
+            .map((s) => ({
+              title: s.title,
+              units: s.units,
+              points: s.points.slice(-12),
+            })),
+        }),
+      });
+
+      if (insight.ok) {
+        const { answer } = await insight.json() as { answer: string };
+        setTrendInsight(answer);
+        setVolumeInsight(answer);
+      }
+    } catch {
+      // Silently fail - insights are optional
+    } finally {
+      setTrendInsightLoading(false);
+      setVolumeInsightLoading(false);
+    }
+  };
+
   const getSeriesMatches = (
     nextCategory: string,
     nextSubcategory: string,
@@ -420,6 +467,15 @@ function App() {
       });
   }, [selectedSeries, timeRange, customFrom, customTo]);
 
+  useEffect(() => {
+    if (selectedSeries.length > 0 && timelineRows.length > 0) {
+      generateChartInsights(selectedSeries, timelineRows);
+    } else {
+      setTrendInsight(null);
+      setVolumeInsight(null);
+    }
+  }, [selectedSeries, timelineRows]);
+
   const latestBySeries = useMemo(() => {
     return selectedSeries
       .map((series) => ({
@@ -494,7 +550,10 @@ function App() {
         <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, px: 2, pb: 2, overflow: 'auto' }}>
           <Card className="chart-card">
             <CardContent>
-              <Typography variant="h6" sx={{ mb: 2 }}>Trend Snapshot</Typography>
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="h6" sx={{ mb: 0.5 }}>Trend Snapshot</Typography>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>Track how each series moves over time. Compare trends and spot inflection points across your filtered selection.</Typography>
+              </Box>
               <Box className="chart-wrap">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={timelineRows}>
@@ -518,13 +577,27 @@ function App() {
                   </LineChart>
                 </ResponsiveContainer>
               </Box>
+              {trendInsight && (
+                <Typography variant="caption" sx={{ mt: 1.5, display: 'block', color: 'text.secondary', fontStyle: 'italic' }}>
+                  💡 {trendInsight}
+                </Typography>
+              )}
+              {trendInsightLoading && (
+                <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <CircularProgress size={12} />
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>Generating insight…</Typography>
+                </Box>
+              )}
             </CardContent>
           </Card>
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, lg: 7 }}>
               <Card className="chart-card">
                 <CardContent>
-                  <Typography variant="h6" sx={{ mb: 2 }}>Volume & Growth</Typography>
+                  <Box sx={{ mb: 2 }}>
+                    <Typography variant="h6" sx={{ mb: 0.5 }}>Volume & Growth</Typography>
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>Cumulative movement of your top series. Larger areas indicate higher volume; stacking shows relative contribution.</Typography>
+                  </Box>
                   <Box className="chart-wrap">
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={timelineRows}>
@@ -546,13 +619,27 @@ function App() {
                       </AreaChart>
                     </ResponsiveContainer>
                   </Box>
+                  {volumeInsight && (
+                    <Typography variant="caption" sx={{ mt: 1.5, display: 'block', color: 'text.secondary', fontStyle: 'italic' }}>
+                      💡 {volumeInsight}
+                    </Typography>
+                  )}
+                  {volumeInsightLoading && (
+                    <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <CircularProgress size={12} />
+                      <Typography variant="caption" sx={{ color: 'text.secondary' }}>Generating insight…</Typography>
+                    </Box>
+                  )}
                 </CardContent>
               </Card>
             </Grid>
             <Grid size={{ xs: 12, lg: 5 }}>
               <Card className="chart-card">
                 <CardContent>
-                  <Typography variant="h6" sx={{ mb: 2 }}>Latest Month Rankings</Typography>
+                  <Box sx={{ mb: 2 }}>
+                    <Typography variant="h6" sx={{ mb: 0.5 }}>Latest Month Rankings</Typography>
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>Current performance snapshot. Compare the most recent data point for each series, ranked by magnitude.</Typography>
+                  </Box>
                   <Box className="chart-wrap">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={latestBySeries} layout="vertical" margin={{ left: 20, right: 12 }}>
