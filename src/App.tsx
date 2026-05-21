@@ -509,10 +509,10 @@ function App() {
     const defs = [
       { label: 'Debit card purchases', match: 'value of purchases' },
       { label: 'Credit card purchases', match: 'value of purchases: personal cards' },
-      { label: 'NPP volume', match: 'total number of npp payments' },
-      { label: 'PayTo volume', match: 'number of payto transactions' },
-      { label: 'Direct credit volume', match: 'number of credit transfers' },
-      { label: 'Direct debit volume', match: 'number of debit transfers' },
+      { label: 'NPP value', match: 'value of npp payments' },
+      { label: 'PayTo value', match: 'value of payto transactions' },
+      { label: 'Direct credit value', match: 'value of credit transfers' },
+      { label: 'Direct debit value', match: 'value of debit transfers' },
     ];
 
     return defs
