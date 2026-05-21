@@ -87,10 +87,17 @@ const RANGE_YEARS: Record<Exclude<RangeOption, 'ALL'>, number> = {
 };
 
 function formatValue(value: number, units: string) {
-  if (units.includes('$')) {
-    return `$${value.toLocaleString(undefined, { maximumFractionDigits: 1 })}m`;
+  const unit = units.toLowerCase();
+  const isCurrency = unit.includes('$');
+
+  let absoluteValue = value;
+  if (unit.includes('$ million') || unit === 'million') {
+    absoluteValue = value * 1_000_000;
+  } else if (unit.includes("'000")) {
+    absoluteValue = value * 1_000;
   }
-  return value.toLocaleString(undefined, { maximumFractionDigits: 1 });
+
+  return `${isCurrency ? '$' : ''}${Math.round(absoluteValue).toLocaleString()}`;
 }
 
 function shortenLabel(label: string, max = 34) {
@@ -490,6 +497,10 @@ function App() {
       .slice(0, 10);
   }, [selectedSeries]);
 
+  const unitsBySeriesId = useMemo(() => {
+    return new Map(selectedSeries.map((series) => [series.id, series.units]));
+  }, [selectedSeries]);
+
   const quickStats = useMemo(() => {
     if (!dataset) {
       return [];
@@ -562,7 +573,12 @@ function App() {
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="label" minTickGap={40} />
                     <YAxis />
-                    <Tooltip />
+                    <Tooltip
+                      formatter={(value, name) => {
+                        const units = unitsBySeriesId.get(String(name)) ?? 'Number';
+                        return formatValue(Number(value), units);
+                      }}
+                    />
                     <Legend />
                     {selectedSeries.map((series, idx) => (
                       <Line
@@ -606,7 +622,12 @@ function App() {
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="label" minTickGap={40} />
                         <YAxis />
-                        <Tooltip />
+                        <Tooltip
+                          formatter={(value, name) => {
+                            const units = unitsBySeriesId.get(String(name)) ?? 'Number';
+                            return formatValue(Number(value), units);
+                          }}
+                        />
                         {selectedSeries.slice(0, 2).map((series, idx) => (
                           <Area
                             key={series.id}
@@ -712,7 +733,7 @@ function App() {
           </Typography>
           <TextField
             fullWidth
-            placeholder='Ask anything: "credit card trends in 2025" or "NPP vs direct entry volume"'
+            placeholder='Ask anything: "Which months see the biggest increase in card payments?" or "Is growth in PayTo accelerating?"'
             value={nlQuery}
             inputRef={nlInputRef}
             onChange={(e) => setNlQuery(e.target.value)}
@@ -730,6 +751,9 @@ function App() {
               },
             }}
           />
+          <Typography variant="caption" sx={{ mt: 1, display: 'block', color: 'text.secondary' }}>
+            Try: "When did card payment growth spike the most?", "Has NPP overtaken direct entry in momentum?", or "Is PayTo acceleration sustained across recent quarters?"
+          </Typography>
           {nlResult && (
             <Typography variant="caption" sx={{ mt: 1, display: 'block', color: 'text.secondary' }}>
               ✓ {nlResult.explanation}
@@ -922,7 +946,12 @@ function App() {
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="label" minTickGap={40} />
                     <YAxis />
-                    <Tooltip />
+                    <Tooltip
+                      formatter={(value, name) => {
+                        const units = unitsBySeriesId.get(String(name)) ?? 'Number';
+                        return formatValue(Number(value), units);
+                      }}
+                    />
                     <Legend />
                     {selectedSeries.map((series, idx) => (
                       <Line
@@ -969,7 +998,12 @@ function App() {
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="label" minTickGap={40} />
                     <YAxis />
-                    <Tooltip />
+                    <Tooltip
+                      formatter={(value, name) => {
+                        const units = unitsBySeriesId.get(String(name)) ?? 'Number';
+                        return formatValue(Number(value), units);
+                      }}
+                    />
                     {selectedSeries.slice(0, 2).map((series, idx) => (
                       <Area
                         key={series.id}
