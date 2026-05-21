@@ -9,6 +9,8 @@ const DEVICE_URL = 'https://auspaynet.com.au/resources/device-statistics';
 const FRAUD_LIST_URL = 'https://auspaynet.com.au/resources/fraud-statistics';
 const APRA_URL = 'https://www.apra.gov.au/authorised-deposit-taking-institutions-points-of-presence-statistics';
 const APRA_WORKBOOK_URL = 'https://www.apra.gov.au/sites/default/files/2025-10/Authorised%20deposit-taking%20institutions%20points%20of%20presence%20June%202017%20to%20June%202025.xlsx';
+const SURVEY_URL = 'https://www.rba.gov.au/payments-and-infrastructure/consumer-payments-explorer/';
+const SURVEY_WORKBOOK_URL = 'https://www.rba.gov.au/payments-and-infrastructure/consumer-payments-explorer/assets/xls/rba-consumer-payments-survey.xlsx';
 
 function cleanText(value) {
   return String(value ?? '')
@@ -63,6 +65,10 @@ function yearQuarterToIso(year, quarterName) {
   return month ? `${year}-${month}-01` : null;
 }
 
+function humanizeLabel(value) {
+  return cleanText(value).replace(/_/g, ' ');
+}
+
 async function fetchHtml(url) {
   const response = await fetch(url);
   if (!response.ok) {
@@ -80,6 +86,67 @@ async function fetchWorkbook(url) {
 
   const buffer = Buffer.from(await response.arrayBuffer());
   return XLSX.read(buffer, { type: 'buffer' });
+}
+
+async function buildSurveySeries() {
+  const workbook = await fetchWorkbook(SURVEY_WORKBOOK_URL);
+  const seriesMap = new Map();
+  const sheetDefinitions = [
+    { sheetName: 'All', segment: 'All' },
+    { sheetName: 'Age', segment: 'Age' },
+    { sheetName: 'Income', segment: 'Income' },
+    { sheetName: 'Region', segment: 'Region' },
+    { sheetName: 'Payment size', segment: 'Payment size' },
+    { sheetName: 'Payment purpose', segment: 'Payment purpose' },
+  ];
+
+  for (const definition of sheetDefinitions) {
+    const sheet = workbook.Sheets[definition.sheetName];
+    if (!sheet) continue;
+
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: null });
+    const headerRow = rows[1] ?? [];
+    const yearColumns = headerRow.slice(3).map((value) => Number(value)).filter((value) => Number.isFinite(value));
+    const sheetTitle = cleanText(rows[0]?.[0] ?? `Consumer Payments Survey: ${definition.segment}`);
+
+    for (const row of rows.slice(2)) {
+      const paymentMethod = cleanText(row?.[1]);
+      const paymentBasis = cleanText(row?.[2]).toLowerCase();
+      if (!paymentMethod || paymentBasis !== 'number') continue;
+
+      const points = [];
+      for (let yearIndex = 0; yearIndex < yearColumns.length; yearIndex += 1) {
+        const year = yearColumns[yearIndex];
+        const value = parseNumber(row[yearIndex + 3]);
+        if (value === null) continue;
+        points.push({ date: `${year}-01-01`, value });
+      }
+
+      if (!points.length) continue;
+
+      const segmentLabel = cleanText(row?.[0] ?? definition.segment);
+      const methodLabel = humanizeLabel(paymentMethod);
+      const key = `rba-survey-${definition.sheetName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${segmentLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${methodLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+
+      seriesMap.set(key, {
+        id: key,
+        tableCode: 'RBA-Consumer-Payments-Survey',
+        tableName: sheetTitle,
+        tableUrl: SURVEY_URL,
+        sheetName: definition.sheetName,
+        title: `Consumer Payments Survey: ${segmentLabel} - ${methodLabel} share by number`,
+        frequency: 'Triennial',
+        units: '%',
+        category: 'Consumer Behaviour',
+        subcategory: `Consumer Payments Survey - ${definition.segment}`,
+        measureType: 'other',
+        dimensions: { segment: definition.segment, method: methodLabel },
+        points,
+      });
+    }
+  }
+
+  return finalizeSeries(seriesMap);
 }
 
 function upsertSeries(seriesMap, key, meta, point) {
@@ -583,14 +650,16 @@ async function main() {
     ...(await buildDeviceSeries()),
     ...(await buildFraudSeries()),
     ...(await buildApraSeries()),
+    ...(await buildSurveySeries()),
   ];
 
-  payload.source = 'Composite payments data (RBA, AusPayNet, APRA)';
+  payload.source = 'Composite payments data (RBA, AusPayNet, APRA, RBA Consumer Survey)';
   payload.sources = [
     { name: 'Reserve Bank of Australia - Payments Statistics', url: 'https://www.rba.gov.au/payments-and-infrastructure/resources/payments-data.html' },
     { name: 'AusPayNet Device Statistics', url: DEVICE_URL },
     { name: 'AusPayNet Fraud Statistics', url: FRAUD_LIST_URL },
     { name: 'APRA Points of Presence Statistics', url: APRA_URL },
+    { name: 'RBA Consumer Payments Survey', url: SURVEY_URL },
   ];
   payload.series = [...payload.series, ...extraSeries];
 

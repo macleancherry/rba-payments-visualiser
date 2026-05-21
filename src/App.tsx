@@ -90,6 +90,10 @@ function formatValue(value: number, units: string) {
   const unit = units.toLowerCase();
   const isCurrency = unit.includes('$');
 
+  if (unit.includes('%') || unit.includes('percent')) {
+    return `${value.toFixed(1).replace(/\.0$/, '')}%`;
+  }
+
   let absoluteValue = value;
   if (unit.includes('$ million') || unit === 'million') {
     absoluteValue = value * 1_000_000;
@@ -728,7 +732,7 @@ function App() {
           Explore Australia's Payments Ecosystem
         </Typography>
         <Typography className="hero-subtitle">
-          Deep dive into a composite set of payments data spanning RBA, AusPayNet, and APRA sources.
+          Deep dive into a composite set of payments data spanning RBA, AusPayNet, APRA, and the RBA consumer payments survey.
           Ask questions in natural language. Discover trends. Make data-driven decisions.
         </Typography>
         <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
