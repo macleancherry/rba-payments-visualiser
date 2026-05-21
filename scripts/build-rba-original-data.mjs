@@ -302,6 +302,19 @@ async function main() {
     }
   }
 
+  // Prepend subcategory to any title that appears in more than one subcategory
+  // so every series has a unique, human-readable name.
+  const titleSubcats = new Map();
+  for (const s of allSeries) {
+    if (!titleSubcats.has(s.title)) titleSubcats.set(s.title, new Set());
+    titleSubcats.get(s.title).add(s.subcategory);
+  }
+  for (const s of allSeries) {
+    if (titleSubcats.get(s.title).size > 1) {
+      s.title = `${s.subcategory}: ${s.title}`;
+    }
+  }
+
   const payload = {
     generatedAt: startedAt,
     source: 'Reserve Bank of Australia - Payments Data (Original Series)',
