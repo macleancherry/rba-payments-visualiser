@@ -510,12 +510,12 @@ function App() {
       {
         label: 'Debit card purchases',
         valueMatch: 'value of purchases',
-        volumeMatch: 'number of purchases',
+        volumeMatch: 'Debit: Number of purchases',
       },
       {
         label: 'Credit card purchases',
         valueMatch: 'value of purchases: personal cards',
-        volumeMatch: 'number of personal card purchases',
+        volumeMatch: 'Credit and Charge: Number of purchases',
       },
       {
         label: 'NPP',
