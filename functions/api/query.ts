@@ -61,35 +61,54 @@ Examples:
 - "cards on issue" → {"category":"Cards","subcategory":null,"measureType":"accounts","timeRange":null,"keywords":"cards on issue","explanation":"Cards on issue across card types"}`;
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
-  const body = await context.request.json<QueryRequest>();
-  const query = body?.query?.trim();
-
-  if (!query) {
-    return Response.json({ error: 'query is required' }, { status: 400 });
-  }
-
-  const response = await context.env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: query },
-    ],
-    max_tokens: 300,
-  });
-
-  const text = (response as { response: string }).response?.trim() ?? '';
-
-  // Extract the JSON object from the response (model may include extra text)
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    return Response.json({ error: 'Could not parse AI response', raw: text }, { status: 500 });
-  }
-
-  let parsed: QueryResponse;
   try {
-    parsed = JSON.parse(jsonMatch[0]) as QueryResponse;
-  } catch {
-    return Response.json({ error: 'Invalid JSON from AI', raw: text }, { status: 500 });
-  }
+    const body = await context.request.json<QueryRequest>();
+    const query = body?.query?.trim();
 
-  return Response.json(parsed);
+    if (!query) {
+      return Response.json({ error: 'query is required' }, { status: 400 });
+    }
+
+    if (!context.env.AI) {
+      return Response.json({ error: 'AI binding not available' }, { status: 500 });
+    }
+
+    const response = await context.env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: query },
+      ],
+      max_tokens: 300,
+    });
+
+    const aiResponse = response as unknown;
+    let parsed: QueryResponse | null = null;
+
+    // Workers AI returns { response: string | object, tool_calls, usage }
+    const inner = aiResponse && typeof aiResponse === 'object'
+      ? (aiResponse as Record<string, unknown>).response
+      : aiResponse;
+
+    if (inner && typeof inner === 'object') {
+      // Model returned a structured object directly
+      parsed = inner as QueryResponse;
+    } else if (typeof inner === 'string') {
+      const jsonMatch = (inner as string).trim().match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        return Response.json({ error: 'Could not parse AI response', raw: inner }, { status: 500 });
+      }
+      try {
+        parsed = JSON.parse(jsonMatch[0]) as QueryResponse;
+      } catch {
+        return Response.json({ error: 'Invalid JSON from AI', raw: inner }, { status: 500 });
+      }
+    } else {
+      return Response.json({ error: 'Unexpected AI response shape', raw: JSON.stringify(aiResponse) }, { status: 500 });
+    }
+
+    return Response.json(parsed);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return Response.json({ error: message }, { status: 500 });
+  }
 };
