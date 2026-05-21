@@ -592,9 +592,9 @@ function App() {
           Ask questions in natural language. Discover trends. Make data-driven decisions.
         </Typography>
         <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
-          <Chip label={`${dataset.series.length} data series`} />
-          <Chip label={`Latest: ${format(parseISO(dataset.generatedAt), 'dd MMM yyyy')}`} />
-          <Chip label="By Mac Cherry - Head of Payments @ Fat Zebra" />
+          <Chip label={`${dataset.series.length} data series`} sx={{ backgroundColor: 'rgba(255, 255, 255, 0.15)', color: '#ffffff' }} />
+          <Chip label={`Latest: ${format(parseISO(dataset.generatedAt), 'dd MMM yyyy')}`} sx={{ backgroundColor: 'rgba(255, 255, 255, 0.15)', color: '#ffffff' }} />
+          <Chip label="By Mac Cherry - Head of Payments @ Fat Zebra" sx={{ backgroundColor: 'rgba(255, 255, 255, 0.15)', color: '#ffffff' }} />
         </Stack>
       </Box>
 
