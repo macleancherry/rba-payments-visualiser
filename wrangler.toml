@@ -1,3 +1,6 @@
 name = "rba-payments-visualiser"
 compatibility_date = "2026-05-21"
 pages_build_output_dir = "dist"
+
+[ai]
+binding = "AI"

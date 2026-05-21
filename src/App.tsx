@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Autocomplete,
@@ -9,6 +9,8 @@ import {
   CircularProgress,
   FormControl,
   Grid,
+  IconButton,
+  InputAdornment,
   InputLabel,
   MenuItem,
   Select,
@@ -16,6 +18,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import {
   Area,
   AreaChart,
@@ -109,6 +112,42 @@ function App() {
   const [dimAcquirer, setDimAcquirer] = useState('All');
   const [dimMethod, setDimMethod] = useState('All');
   const [dimInstrument, setDimInstrument] = useState('All');
+
+  const [nlQuery, setNlQuery] = useState('');
+  const [nlLoading, setNlLoading] = useState(false);
+  const [nlResult, setNlResult] = useState<{ explanation: string } | null>(null);
+  const [nlError, setNlError] = useState<string | null>(null);
+  const nlInputRef = useRef<HTMLInputElement>(null);
+
+  const handleNlQuery = async () => {
+    const q = nlQuery.trim();
+    if (!q) return;
+    setNlLoading(true);
+    setNlError(null);
+    setNlResult(null);
+    try {
+      const res = await fetch('/api/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q }),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      const data = await res.json() as {
+        category?: string; subcategory?: string; measureType?: string;
+        timeRange?: string; keywords?: string; explanation: string;
+      };
+      if (data.category) setCategory(data.category);
+      if (data.subcategory) setSubcategory(data.subcategory);
+      if (data.measureType) setMeasureType(data.measureType as 'All' | MeasureType);
+      if (data.timeRange) setTimeRange(data.timeRange as RangeOption);
+      if (data.keywords) setSeriesSearch(data.keywords);
+      setNlResult({ explanation: data.explanation });
+    } catch (e) {
+      setNlError(e instanceof Error ? e.message : 'Unknown error');
+    } finally {
+      setNlLoading(false);
+    }
+  };
 
   useEffect(() => {
     const run = async () => {
@@ -363,6 +402,44 @@ function App() {
           </Grid>
         ))}
       </Grid>
+
+      <Card sx={{ mb: 2, p: 1 }}>
+        <CardContent>
+          <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+            Ask a question
+          </Typography>
+          <TextField
+            fullWidth
+            placeholder='e.g. "credit card contactless spending last 2 years" or "how many NPP payments?"'
+            value={nlQuery}
+            inputRef={nlInputRef}
+            onChange={(e) => setNlQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleNlQuery(); }}
+            disabled={nlLoading}
+            slotProps={{
+              input: {
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton onClick={handleNlQuery} disabled={nlLoading || !nlQuery.trim()} edge="end">
+                      {nlLoading ? <CircularProgress size={20} /> : <AutoFixHighIcon />}
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              },
+            }}
+          />
+          {nlResult && (
+            <Typography variant="caption" sx={{ mt: 1, display: 'block', color: 'text.secondary' }}>
+              ✓ {nlResult.explanation}
+            </Typography>
+          )}
+          {nlError && (
+            <Typography variant="caption" sx={{ mt: 1, display: 'block', color: 'error.main' }}>
+              {nlError}
+            </Typography>
+          )}
+        </CardContent>
+      </Card>
 
       <Card className="filter-card">
         <CardContent>
