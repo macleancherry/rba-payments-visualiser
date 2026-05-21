@@ -494,7 +494,7 @@ function App() {
         <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, px: 2, pb: 2, overflow: 'auto' }}>
           <Card className="chart-card">
             <CardContent>
-              <Typography variant="h6" sx={{ mb: 2 }}>Trend View</Typography>
+              <Typography variant="h6" sx={{ mb: 2 }}>Trend Snapshot</Typography>
               <Box className="chart-wrap">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={timelineRows}>
@@ -524,7 +524,7 @@ function App() {
             <Grid size={{ xs: 12, lg: 7 }}>
               <Card className="chart-card">
                 <CardContent>
-                  <Typography variant="h6" sx={{ mb: 2 }}>Momentum Area</Typography>
+                  <Typography variant="h6" sx={{ mb: 2 }}>Volume & Growth</Typography>
                   <Box className="chart-wrap">
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={timelineRows}>
@@ -552,7 +552,7 @@ function App() {
             <Grid size={{ xs: 12, lg: 5 }}>
               <Card className="chart-card">
                 <CardContent>
-                  <Typography variant="h6" sx={{ mb: 2 }}>Latest Monthly Snapshot</Typography>
+                  <Typography variant="h6" sx={{ mb: 2 }}>Latest Month Rankings</Typography>
                   <Box className="chart-wrap">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={latestBySeries} layout="vertical" margin={{ left: 20, right: 12 }}>
@@ -582,19 +582,19 @@ function App() {
     <Box className="page">
       <Box className="hero-shell">
         <Typography variant="overline" className="badge">
-          Reserve Bank Payments Explorer
+          Payments Intelligence
         </Typography>
         <Typography variant="h2" className="hero-title">
-          Australian Payments Data, Original Series
+          Explore Australia's Payments Ecosystem
         </Typography>
         <Typography className="hero-subtitle">
-          Organised into clear payment families including Cards (Credit, Debit, Prepaid), Direct Entry,
-          NPP, PayTo, ATM, Cheques and RTGS, sourced directly from RBA original-series tables.
+          Deep dive into 248+ series of RBA payments data spanning Cards, Direct Entry, NPP, PayTo, and more.
+          Ask questions in natural language. Discover trends. Make data-driven decisions.
         </Typography>
         <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
-          <Chip label={`Series: ${dataset.series.length}`} />
-          <Chip label={`Updated: ${format(parseISO(dataset.generatedAt), 'dd MMM yyyy')}`} />
-          <Chip label="Source: RBA Payments Data" />
+          <Chip label={`${dataset.series.length} data series`} />
+          <Chip label={`Latest: ${format(parseISO(dataset.generatedAt), 'dd MMM yyyy')}`} />
+          <Chip label="Built by Maclean Cherry" />
         </Stack>
       </Box>
 
@@ -619,11 +619,11 @@ function App() {
       <Card sx={{ mb: 3, p: 1 }}>
         <CardContent>
           <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
-            Ask a question
+            Interrogate the data
           </Typography>
           <TextField
             fullWidth
-            placeholder='e.g. "credit card contactless spending last 2 years" or "how many NPP payments?"'
+            placeholder='Ask anything: "credit card trends in 2025" or "NPP vs direct entry volume"'
             value={nlQuery}
             inputRef={nlInputRef}
             onChange={(e) => setNlQuery(e.target.value)}
