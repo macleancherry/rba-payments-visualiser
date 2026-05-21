@@ -191,16 +191,24 @@ function App() {
     setDimInstrument('All');
   }, [category, subcategory, measureType, seriesSearch]);
 
-  // Final series: base + dimension filters applied
+  // Final series: base + dimension filters applied.
+  // When a dimension is set to "All": if aggregates (series with no tag) exist in baseSeries,
+  // show only those aggregates so breakdowns don't flood the list.
+  // If no aggregate exists for that dimension (all series have a tag), show everything.
   const filteredSeries = useMemo(() => {
+    const dimFilter = (item: PaymentSeries, key: keyof SeriesDimensions, selected: string) => {
+      if (selected !== 'All') return item.dimensions?.[key] === selected;
+      const hasAggregate = baseSeries.some((s) => !s.dimensions?.[key]);
+      return hasAggregate ? !item.dimensions?.[key] : true;
+    };
     return baseSeries
-      .filter((item) => dimSegment === 'All' || (item.dimensions?.segment ?? 'All') === dimSegment)
-      .filter((item) => dimCardType === 'All' || (item.dimensions?.cardType ?? 'All') === dimCardType)
-      .filter((item) => dimPrepaidType === 'All' || (item.dimensions?.prepaidType ?? 'All') === dimPrepaidType)
-      .filter((item) => dimLocation === 'All' || (item.dimensions?.location ?? 'All') === dimLocation)
-      .filter((item) => dimAcquirer === 'All' || (item.dimensions?.acquirer ?? 'All') === dimAcquirer)
-      .filter((item) => dimMethod === 'All' || (item.dimensions?.method ?? 'All') === dimMethod)
-      .filter((item) => dimInstrument === 'All' || (item.dimensions?.instrument ?? 'All') === dimInstrument);
+      .filter((item) => dimFilter(item, 'segment', dimSegment))
+      .filter((item) => dimFilter(item, 'cardType', dimCardType))
+      .filter((item) => dimFilter(item, 'prepaidType', dimPrepaidType))
+      .filter((item) => dimFilter(item, 'location', dimLocation))
+      .filter((item) => dimFilter(item, 'acquirer', dimAcquirer))
+      .filter((item) => dimFilter(item, 'method', dimMethod))
+      .filter((item) => dimFilter(item, 'instrument', dimInstrument));
   }, [baseSeries, dimSegment, dimCardType, dimPrepaidType, dimLocation, dimAcquirer, dimMethod, dimInstrument]);
 
   useEffect(() => {
