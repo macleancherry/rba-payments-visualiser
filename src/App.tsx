@@ -3,6 +3,7 @@ import {
   Alert,
   Autocomplete,
   Box,
+  Button,
   Card,
   CardContent,
   Chip,
@@ -122,6 +123,28 @@ function App() {
   const [customTo, setCustomTo] = useState<string | null>(null);
   const [nlAnswer, setNlAnswer] = useState<string | null>(null);
   const [nlAnswerLoading, setNlAnswerLoading] = useState(false);
+
+  const handleReset = () => {
+    setCategory('All');
+    setSubcategory('All');
+    setMeasureType('All');
+    setSeriesSearch('');
+    setTimeRange('5Y');
+    setCustomFrom(null);
+    setCustomTo(null);
+    setDimSegment('All');
+    setDimCardType('All');
+    setDimPrepaidType('All');
+    setDimLocation('All');
+    setDimAcquirer('All');
+    setDimMethod('All');
+    setDimInstrument('All');
+    setNlQuery('');
+    setNlResult(null);
+    setNlError(null);
+    setNlAnswer(null);
+    setSelectedSeries([]);
+  };
 
   const handleNlQuery = async () => {
     const q = nlQuery.trim();
@@ -520,6 +543,10 @@ function App() {
 
       <Card className="filter-card">
         <CardContent>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Filters</Typography>
+            <Button size="small" onClick={handleReset} color="inherit" sx={{ textTransform: 'none', color: 'text.secondary' }}>Reset all</Button>
+          </Box>
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, md: 6, lg: 3 }}>
               <FormControl fullWidth>
