@@ -594,7 +594,7 @@ function App() {
         <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
           <Chip label={`${dataset.series.length} data series`} />
           <Chip label={`Latest: ${format(parseISO(dataset.generatedAt), 'dd MMM yyyy')}`} />
-          <Chip label="Built by Maclean Cherry" />
+          <Chip label="By Mac Cherry - Head of Payments @ Fat Zebra" />
         </Stack>
       </Box>
 
