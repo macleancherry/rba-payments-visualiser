@@ -906,30 +906,6 @@ function App() {
               <FullscreenIcon />
             </IconButton>
           </Box>
-          <Card className="chart-card" sx={{ mb: 2 }}>
-            <CardContent>
-              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-                AI Commentary
-              </Typography>
-              <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
-                Live interpretation of the currently filtered view. Updates when filters, time range, or selected series change.
-              </Typography>
-              {trendInsightLoading ? (
-                <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <CircularProgress size={14} />
-                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>Generating commentary…</Typography>
-                </Box>
-              ) : trendInsight ? (
-                <Alert severity="info" sx={{ mt: 1.5 }}>
-                  <Typography variant="body2">{trendInsight}</Typography>
-                </Alert>
-              ) : (
-                <Typography variant="caption" sx={{ mt: 1.5, display: 'block', color: 'text.secondary' }}>
-                  Adjust filters or select series to generate commentary.
-                </Typography>
-              )}
-            </CardContent>
-          </Card>
           <Grid container spacing={2}>
         <Grid size={{ xs: 12 }}>
           <Card className="chart-card">
@@ -963,6 +939,17 @@ function App() {
                   </LineChart>
                 </ResponsiveContainer>
               </Box>
+              {trendInsight && (
+                <Typography variant="caption" sx={{ mt: 1.5, display: 'block', color: 'text.secondary', fontStyle: 'italic' }}>
+                  💡 {trendInsight}
+                </Typography>
+              )}
+              {trendInsightLoading && (
+                <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <CircularProgress size={12} />
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>Generating insight…</Typography>
+                </Box>
+              )}
             </CardContent>
           </Card>
         </Grid>
@@ -997,6 +984,17 @@ function App() {
                   </AreaChart>
                 </ResponsiveContainer>
               </Box>
+              {volumeInsight && (
+                <Typography variant="caption" sx={{ mt: 1.5, display: 'block', color: 'text.secondary', fontStyle: 'italic' }}>
+                  💡 {volumeInsight}
+                </Typography>
+              )}
+              {volumeInsightLoading && (
+                <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <CircularProgress size={12} />
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>Generating insight…</Typography>
+                </Box>
+              )}
             </CardContent>
           </Card>
         </Grid>
