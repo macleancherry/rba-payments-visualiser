@@ -507,32 +507,62 @@ function App() {
     }
 
     const defs = [
-      { label: 'Debit card purchases', match: 'value of purchases' },
-      { label: 'Credit card purchases', match: 'value of purchases: personal cards' },
-      { label: 'NPP value', match: 'value of npp payments' },
-      { label: 'PayTo value', match: 'value of payto transactions' },
-      { label: 'Direct credit value', match: 'value of credit transfers' },
-      { label: 'Direct debit value', match: 'value of debit transfers' },
+      {
+        label: 'Debit card purchases',
+        valueMatch: 'value of purchases',
+        volumeMatch: 'number of purchases',
+      },
+      {
+        label: 'Credit card purchases',
+        valueMatch: 'value of purchases: personal cards',
+        volumeMatch: 'number of personal card purchases',
+      },
+      {
+        label: 'NPP',
+        valueMatch: 'value of npp payments',
+        volumeMatch: 'total number of npp payments',
+      },
+      {
+        label: 'PayTo',
+        valueMatch: 'value of payto transactions',
+        volumeMatch: 'number of payto transactions',
+      },
+      {
+        label: 'Direct credit',
+        valueMatch: 'value of credit transfers',
+        volumeMatch: 'number of credit transfers',
+      },
+      {
+        label: 'Direct debit',
+        valueMatch: 'value of debit transfers',
+        volumeMatch: 'number of debit transfers',
+      },
     ];
 
     return defs
       .map((item) => {
-        const series = dataset.series.find((candidate) =>
-          candidate.title.toLowerCase().includes(item.match.toLowerCase()),
+        const valueSeries = dataset.series.find((candidate) =>
+          candidate.title.toLowerCase().includes(item.valueMatch.toLowerCase()),
+        );
+        const volumeSeries = dataset.series.find((candidate) =>
+          candidate.title.toLowerCase().includes(item.volumeMatch.toLowerCase()),
         );
 
-        if (!series?.points.length) {
+        if (!valueSeries?.points.length) {
           return null;
         }
 
-        const latest = series.points[series.points.length - 1];
+        const latestValue = valueSeries.points[valueSeries.points.length - 1];
+        const latestVolume = volumeSeries?.points[volumeSeries.points.length - 1];
+
         return {
           label: item.label,
-          value: formatValue(latest.value, series.units),
-          date: format(parseISO(latest.date), 'MMM yyyy'),
+          value: formatValue(latestValue.value, valueSeries.units),
+          volume: latestVolume ? formatValue(latestVolume.value, volumeSeries.units) : null,
+          date: format(parseISO(latestValue.date), 'MMM yyyy'),
         };
       })
-      .filter(Boolean) as Array<{ label: string; value: string; date: string }>;
+      .filter(Boolean) as Array<{ label: string; value: string; volume: string | null; date: string }>;
   }, [dataset]);
 
   if (loadError) {
@@ -719,6 +749,11 @@ function App() {
                 <Typography variant="h5" className="metric-value">
                   {stat.value}
                 </Typography>
+                {stat.volume && (
+                  <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+                    {stat.volume} transactions
+                  </Typography>
+                )}
                 <Typography variant="caption">Latest month: {stat.date}</Typography>
               </CardContent>
             </Card>
