@@ -168,6 +168,14 @@ function inferDimensions(title) {
   if (t.includes('personal cards')) d.segment = 'Personal';
   else if (t.includes('commercial cards')) d.segment = 'Commercial';
 
+  // Card type (credit vs charge within the credit & charge category)
+  if (/\bnumber of credit cards\b/.test(t) || /credit cards on issue/.test(t)) d.cardType = 'Credit';
+  else if (/\bnumber of charge cards\b/.test(t) || /charge cards on issue/.test(t)) d.cardType = 'Charge';
+
+  // Prepaid card sub-type
+  if (t.includes('single-load')) d.prepaidType = 'Single-load';
+  else if (t.includes('reloadable')) d.prepaidType = 'Reloadable';
+
   // For "acquired in Australia" series the location words refer to the acquirer, not the transaction location
   const isAcquirerSeries = t.includes('acquired in australia');
 

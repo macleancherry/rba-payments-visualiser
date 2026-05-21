@@ -42,6 +42,8 @@ type SeriesPoint = {
 
 type SeriesDimensions = {
   segment?: string;
+  cardType?: string;
+  prepaidType?: string;
   location?: string;
   acquirer?: string;
   method?: string;
@@ -101,6 +103,8 @@ function App() {
   const [selectedSeries, setSelectedSeries] = useState<PaymentSeries[]>([]);
 
   const [dimSegment, setDimSegment] = useState('All');
+  const [dimCardType, setDimCardType] = useState('All');
+  const [dimPrepaidType, setDimPrepaidType] = useState('All');
   const [dimLocation, setDimLocation] = useState('All');
   const [dimAcquirer, setDimAcquirer] = useState('All');
   const [dimMethod, setDimMethod] = useState('All');
@@ -167,6 +171,8 @@ function App() {
       Array.from(new Set(baseSeries.map((s) => s.dimensions?.[key]).filter(Boolean) as string[])).sort();
     return {
       segment: get('segment'),
+      cardType: get('cardType'),
+      prepaidType: get('prepaidType'),
       location: get('location'),
       acquirer: get('acquirer'),
       method: get('method'),
@@ -177,6 +183,8 @@ function App() {
   // Reset dimension filters when primary filters change
   useEffect(() => {
     setDimSegment('All');
+    setDimCardType('All');
+    setDimPrepaidType('All');
     setDimLocation('All');
     setDimAcquirer('All');
     setDimMethod('All');
@@ -187,11 +195,13 @@ function App() {
   const filteredSeries = useMemo(() => {
     return baseSeries
       .filter((item) => dimSegment === 'All' || (item.dimensions?.segment ?? 'All') === dimSegment)
+      .filter((item) => dimCardType === 'All' || (item.dimensions?.cardType ?? 'All') === dimCardType)
+      .filter((item) => dimPrepaidType === 'All' || (item.dimensions?.prepaidType ?? 'All') === dimPrepaidType)
       .filter((item) => dimLocation === 'All' || (item.dimensions?.location ?? 'All') === dimLocation)
       .filter((item) => dimAcquirer === 'All' || (item.dimensions?.acquirer ?? 'All') === dimAcquirer)
       .filter((item) => dimMethod === 'All' || (item.dimensions?.method ?? 'All') === dimMethod)
       .filter((item) => dimInstrument === 'All' || (item.dimensions?.instrument ?? 'All') === dimInstrument);
-  }, [baseSeries, dimSegment, dimLocation, dimAcquirer, dimMethod, dimInstrument]);
+  }, [baseSeries, dimSegment, dimCardType, dimPrepaidType, dimLocation, dimAcquirer, dimMethod, dimInstrument]);
 
   useEffect(() => {
     if (!filteredSeries.length) {
@@ -417,6 +427,28 @@ function App() {
                   <Select value={dimSegment} label="Segment" onChange={(e) => setDimSegment(e.target.value)}>
                     <MenuItem value="All">All</MenuItem>
                     {dimOptions.segment.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              </Grid>
+            )}
+            {dimOptions.cardType.length > 1 && (
+              <Grid size={{ xs: 12, md: 6, lg: 3 }}>
+                <FormControl fullWidth>
+                  <InputLabel>Card Type</InputLabel>
+                  <Select value={dimCardType} label="Card Type" onChange={(e) => setDimCardType(e.target.value)}>
+                    <MenuItem value="All">All</MenuItem>
+                    {dimOptions.cardType.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              </Grid>
+            )}
+            {dimOptions.prepaidType.length > 1 && (
+              <Grid size={{ xs: 12, md: 6, lg: 3 }}>
+                <FormControl fullWidth>
+                  <InputLabel>Prepaid Type</InputLabel>
+                  <Select value={dimPrepaidType} label="Prepaid Type" onChange={(e) => setDimPrepaidType(e.target.value)}>
+                    <MenuItem value="All">All</MenuItem>
+                    {dimOptions.prepaidType.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
                   </Select>
                 </FormControl>
               </Grid>
