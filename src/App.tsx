@@ -40,6 +40,14 @@ type SeriesPoint = {
   value: number;
 };
 
+type SeriesDimensions = {
+  segment?: string;
+  location?: string;
+  acquirer?: string;
+  method?: string;
+  instrument?: string;
+};
+
 type PaymentSeries = {
   id: string;
   tableCode: string;
@@ -52,6 +60,7 @@ type PaymentSeries = {
   category: string;
   subcategory: string;
   measureType: MeasureType;
+  dimensions: SeriesDimensions;
   points: SeriesPoint[];
 };
 
@@ -90,6 +99,12 @@ function App() {
   const [seriesSearch, setSeriesSearch] = useState('');
   const [timeRange, setTimeRange] = useState<RangeOption>('5Y');
   const [selectedSeries, setSelectedSeries] = useState<PaymentSeries[]>([]);
+
+  const [dimSegment, setDimSegment] = useState('All');
+  const [dimLocation, setDimLocation] = useState('All');
+  const [dimAcquirer, setDimAcquirer] = useState('All');
+  const [dimMethod, setDimMethod] = useState('All');
+  const [dimInstrument, setDimInstrument] = useState('All');
 
   useEffect(() => {
     const run = async () => {
@@ -130,7 +145,8 @@ function App() {
     ).sort();
   }, [category, dataset]);
 
-  const filteredSeries = useMemo(() => {
+  // Base series: filtered by category/subcategory/measure/search but NOT by dimensions
+  const baseSeries = useMemo(() => {
     if (!dataset) {
       return [];
     }
@@ -144,6 +160,38 @@ function App() {
       )
       .sort((a, b) => a.title.localeCompare(b.title));
   }, [category, dataset, measureType, seriesSearch, subcategory]);
+
+  // Available dimension values for the current base set
+  const dimOptions = useMemo(() => {
+    const get = (key: keyof SeriesDimensions) =>
+      Array.from(new Set(baseSeries.map((s) => s.dimensions?.[key]).filter(Boolean) as string[])).sort();
+    return {
+      segment: get('segment'),
+      location: get('location'),
+      acquirer: get('acquirer'),
+      method: get('method'),
+      instrument: get('instrument'),
+    };
+  }, [baseSeries]);
+
+  // Reset dimension filters when primary filters change
+  useEffect(() => {
+    setDimSegment('All');
+    setDimLocation('All');
+    setDimAcquirer('All');
+    setDimMethod('All');
+    setDimInstrument('All');
+  }, [category, subcategory, measureType, seriesSearch]);
+
+  // Final series: base + dimension filters applied
+  const filteredSeries = useMemo(() => {
+    return baseSeries
+      .filter((item) => dimSegment === 'All' || (item.dimensions?.segment ?? 'All') === dimSegment)
+      .filter((item) => dimLocation === 'All' || (item.dimensions?.location ?? 'All') === dimLocation)
+      .filter((item) => dimAcquirer === 'All' || (item.dimensions?.acquirer ?? 'All') === dimAcquirer)
+      .filter((item) => dimMethod === 'All' || (item.dimensions?.method ?? 'All') === dimMethod)
+      .filter((item) => dimInstrument === 'All' || (item.dimensions?.instrument ?? 'All') === dimInstrument);
+  }, [baseSeries, dimSegment, dimLocation, dimAcquirer, dimMethod, dimInstrument]);
 
   useEffect(() => {
     if (!filteredSeries.length) {
@@ -362,6 +410,61 @@ function App() {
                 </Select>
               </FormControl>
             </Grid>
+            {dimOptions.segment.length > 1 && (
+              <Grid size={{ xs: 12, md: 6, lg: 3 }}>
+                <FormControl fullWidth>
+                  <InputLabel>Segment</InputLabel>
+                  <Select value={dimSegment} label="Segment" onChange={(e) => setDimSegment(e.target.value)}>
+                    <MenuItem value="All">All</MenuItem>
+                    {dimOptions.segment.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              </Grid>
+            )}
+            {dimOptions.location.length > 1 && (
+              <Grid size={{ xs: 12, md: 6, lg: 3 }}>
+                <FormControl fullWidth>
+                  <InputLabel>Location</InputLabel>
+                  <Select value={dimLocation} label="Location" onChange={(e) => setDimLocation(e.target.value)}>
+                    <MenuItem value="All">All</MenuItem>
+                    {dimOptions.location.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              </Grid>
+            )}
+            {dimOptions.acquirer.length > 1 && (
+              <Grid size={{ xs: 12, md: 6, lg: 3 }}>
+                <FormControl fullWidth>
+                  <InputLabel>Acquirer</InputLabel>
+                  <Select value={dimAcquirer} label="Acquirer" onChange={(e) => setDimAcquirer(e.target.value)}>
+                    <MenuItem value="All">All</MenuItem>
+                    {dimOptions.acquirer.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              </Grid>
+            )}
+            {dimOptions.method.length > 1 && (
+              <Grid size={{ xs: 12, md: 6, lg: 3 }}>
+                <FormControl fullWidth>
+                  <InputLabel>Payment Method</InputLabel>
+                  <Select value={dimMethod} label="Payment Method" onChange={(e) => setDimMethod(e.target.value)}>
+                    <MenuItem value="All">All</MenuItem>
+                    {dimOptions.method.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              </Grid>
+            )}
+            {dimOptions.instrument.length > 1 && (
+              <Grid size={{ xs: 12, md: 6, lg: 3 }}>
+                <FormControl fullWidth>
+                  <InputLabel>Instrument</InputLabel>
+                  <Select value={dimInstrument} label="Instrument" onChange={(e) => setDimInstrument(e.target.value)}>
+                    <MenuItem value="All">All</MenuItem>
+                    {dimOptions.instrument.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              </Grid>
+            )}
             <Grid size={{ xs: 12 }}>
               <TextField
                 fullWidth

@@ -160,6 +160,43 @@ function inferMeasureType(title, units) {
   return 'other';
 }
 
+function inferDimensions(title) {
+  const t = title.toLowerCase();
+  const d = {};
+
+  // Customer segment (credit/charge cards split into personal and commercial)
+  if (t.includes('personal cards')) d.segment = 'Personal';
+  else if (t.includes('commercial cards')) d.segment = 'Commercial';
+
+  // For "acquired in Australia" series the location words refer to the acquirer, not the transaction location
+  const isAcquirerSeries = t.includes('acquired in australia');
+
+  if (!isAcquirerSeries) {
+    if (t.includes('domestic')) d.location = 'Domestic';
+    else if (t.includes('overseas')) d.location = 'Overseas';
+  }
+
+  // Acquirer perspective (issuer vs acquirer)
+  if (isAcquirerSeries) {
+    if (t.includes('own cards')) d.acquirer = 'Own cards';
+    else if (t.includes('other domestic cards')) d.acquirer = 'Other domestic cards';
+    else if (t.includes('overseas-issued cards')) d.acquirer = 'Overseas-issued cards';
+  }
+
+  // Payment interaction method
+  if (t.includes('non-contactless')) d.method = 'Non-contactless';
+  else if (t.includes('contactless')) d.method = 'Contactless';
+  else if (t.includes('device not present')) d.method = 'Device not present';
+  else if (t.includes('device present')) d.method = 'Device present';
+
+  // Payment instrument (deepest level)
+  if (t.includes('mobile wallet')) d.instrument = 'Mobile wallet';
+  else if (/contactless: card|not present: card/.test(t)) d.instrument = 'Card';
+  else if (/contactless: other|not present: other/.test(t)) d.instrument = 'Other';
+
+  return d;
+}
+
 async function loadWorkbook(url) {
   const response = await fetch(url);
   if (!response.ok) {
@@ -228,6 +265,7 @@ function parseSheet(table, sheetName, worksheet) {
       category: table.category,
       subcategory: inferSubcategory(table.subcategory, title),
       measureType: inferMeasureType(title, unit),
+      dimensions: inferDimensions(title),
       points,
     });
   }
