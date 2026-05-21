@@ -20,6 +20,8 @@ import {
   Typography,
 } from '@mui/material';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import FullscreenIcon from '@mui/icons-material/Fullscreen';
+import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import {
   Area,
   AreaChart,
@@ -136,6 +138,7 @@ function App() {
   const [customTo, setCustomTo] = useState<string | null>(null);
   const [nlAnswer, setNlAnswer] = useState<string | null>(null);
   const [nlAnswerLoading, setNlAnswerLoading] = useState(false);
+  const [isChartFullscreen, setIsChartFullscreen] = useState(false);
 
   const getSeriesMatches = (
     nextCategory: string,
@@ -480,6 +483,101 @@ function App() {
     );
   }
 
+  if (isChartFullscreen) {
+    return (
+      <Box className="page" sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+        <Box sx={{ p: 2, display: 'flex', justifyContent: 'flex-end', borderBottom: '1px solid #e0e0e0' }}>
+          <IconButton onClick={() => setIsChartFullscreen(false)} title="Exit fullscreen">
+            <FullscreenExitIcon />
+          </IconButton>
+        </Box>
+        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, px: 2, pb: 2, overflow: 'auto' }}>
+          <Card className="chart-card">
+            <CardContent>
+              <Typography variant="h6" sx={{ mb: 2 }}>Trend View</Typography>
+              <Box className="chart-wrap">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={timelineRows}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="label" minTickGap={40} />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    {selectedSeries.map((series, idx) => (
+                      <Line
+                        key={series.id}
+                        type="monotone"
+                        dataKey={series.id}
+                        name={series.title}
+                        stroke={SERIES_COLORS[idx % SERIES_COLORS.length]}
+                        dot={false}
+                        strokeWidth={2}
+                        connectNulls
+                      />
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              </Box>
+            </CardContent>
+          </Card>
+          <Grid container spacing={2}>
+            <Grid size={{ xs: 12, lg: 7 }}>
+              <Card className="chart-card">
+                <CardContent>
+                  <Typography variant="h6" sx={{ mb: 2 }}>Momentum Area</Typography>
+                  <Box className="chart-wrap">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={timelineRows}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="label" minTickGap={40} />
+                        <YAxis />
+                        <Tooltip />
+                        {selectedSeries.slice(0, 2).map((series, idx) => (
+                          <Area
+                            key={series.id}
+                            type="monotone"
+                            dataKey={series.id}
+                            name={series.title}
+                            stroke={SERIES_COLORS[idx % SERIES_COLORS.length]}
+                            fill={SERIES_COLORS[idx % SERIES_COLORS.length]}
+                            fillOpacity={0.25}
+                          />
+                        ))}
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid size={{ xs: 12, lg: 5 }}>
+              <Card className="chart-card">
+                <CardContent>
+                  <Typography variant="h6" sx={{ mb: 2 }}>Latest Monthly Snapshot</Typography>
+                  <Box className="chart-wrap">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={latestBySeries} layout="vertical" margin={{ left: 20, right: 12 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis type="number" />
+                        <YAxis type="category" dataKey="label" width={220} />
+                        <Tooltip
+                          formatter={(value, _name, item) => {
+                            const units = String(item.payload.units ?? '');
+                            return formatValue(Number(value), units);
+                          }}
+                        />
+                        <Bar dataKey="value" fill="#0f4c81" radius={[0, 8, 8, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+        </Box>
+      </Box>
+    );
+  }
+
   return (
     <Box className="page">
       <Box className="hero-shell">
@@ -518,7 +616,7 @@ function App() {
         ))}
       </Grid>
 
-      <Card sx={{ mb: 2, p: 1 }}>
+      <Card sx={{ mb: 3, p: 1 }}>
         <CardContent>
           <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
             Ask a question
@@ -567,188 +665,159 @@ function App() {
         </CardContent>
       </Card>
 
-      <Card className="filter-card">
-        <CardContent>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Filters</Typography>
-            <Button size="small" onClick={handleReset} color="inherit" sx={{ textTransform: 'none', color: 'text.secondary' }}>Reset all</Button>
+      {/* Main 2-column layout: filters (left) and charts (right) */}
+      <Grid container spacing={2}>
+        {/* Left Column: Sticky Filters */}
+        <Grid size={{ xs: 12, md: 3 }}>
+          <Card className="filter-card" sx={{ position: 'sticky', top: 16 }}>
+            <CardContent>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Filters</Typography>
+                <Button size="small" onClick={handleReset} color="inherit" sx={{ textTransform: 'none', color: 'text.secondary' }}>Reset all</Button>
+              </Box>
+              <Stack spacing={2}>
+                <FormControl fullWidth>
+                  <InputLabel>Category</InputLabel>
+                  <Select value={category} label="Category" onChange={(e) => setCategory(e.target.value)}>
+                    <MenuItem value="All">All</MenuItem>
+                    {categories.map((item) => (
+                      <MenuItem key={item} value={item}>{item}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+
+                <FormControl fullWidth>
+                  <InputLabel>Subcategory</InputLabel>
+                  <Select value={subcategory} label="Subcategory" onChange={(e) => setSubcategory(e.target.value)}>
+                    <MenuItem value="All">All</MenuItem>
+                    {subcategories.map((item) => (
+                      <MenuItem key={item} value={item}>{item}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+
+                <FormControl fullWidth>
+                  <InputLabel>Measure</InputLabel>
+                  <Select value={measureType} label="Measure" onChange={(e) => setMeasureType(e.target.value as 'All' | MeasureType)}>
+                    <MenuItem value="All">All</MenuItem>
+                    <MenuItem value="value">Value</MenuItem>
+                    <MenuItem value="volume">Volume</MenuItem>
+                    <MenuItem value="accounts">Accounts / Stock</MenuItem>
+                    <MenuItem value="other">Other</MenuItem>
+                  </Select>
+                </FormControl>
+
+                <FormControl fullWidth>
+                  <InputLabel>Range</InputLabel>
+                  <Select value={timeRange} label="Range" onChange={(e) => { setTimeRange(e.target.value as RangeOption); setCustomFrom(null); setCustomTo(null); }}>
+                    <MenuItem value="2Y">2 Years</MenuItem>
+                    <MenuItem value="5Y">5 Years</MenuItem>
+                    <MenuItem value="10Y">10 Years</MenuItem>
+                    <MenuItem value="ALL">All History</MenuItem>
+                  </Select>
+                  {(customFrom || customTo) && (
+                    <Box sx={{ mt: 0.5, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <Typography variant="caption" color="primary">
+                        Custom: {customFrom ?? '…'} → {customTo ?? '…'}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => { setCustomFrom(null); setCustomTo(null); }}>clear</Typography>
+                    </Box>
+                  )}
+                </FormControl>
+            {dimOptions.segment.length > 1 && (
+                  <FormControl fullWidth>
+                    <InputLabel>Segment</InputLabel>
+                    <Select value={dimSegment} label="Segment" onChange={(e) => setDimSegment(e.target.value)}>
+                      <MenuItem value="All">All</MenuItem>
+                      {dimOptions.segment.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
+                    </Select>
+                  </FormControl>
+                )}
+
+                {dimOptions.cardType.length > 1 && (
+                  <FormControl fullWidth>
+                    <InputLabel>Card Type</InputLabel>
+                    <Select value={dimCardType} label="Card Type" onChange={(e) => setDimCardType(e.target.value)}>
+                      <MenuItem value="All">All</MenuItem>
+                      {dimOptions.cardType.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
+                    </Select>
+                  </FormControl>
+                )}
+
+                {dimOptions.prepaidType.length > 1 && (
+                  <FormControl fullWidth>
+                    <InputLabel>Prepaid Type</InputLabel>
+                    <Select value={dimPrepaidType} label="Prepaid Type" onChange={(e) => setDimPrepaidType(e.target.value)}>
+                      <MenuItem value="All">All</MenuItem>
+                      {dimOptions.prepaidType.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
+                    </Select>
+                  </FormControl>
+                )}
+
+                {dimOptions.location.length > 1 && (
+                  <FormControl fullWidth>
+                    <InputLabel>Location</InputLabel>
+                    <Select value={dimLocation} label="Location" onChange={(e) => setDimLocation(e.target.value)}>
+                      <MenuItem value="All">All</MenuItem>
+                      {dimOptions.location.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
+                    </Select>
+                  </FormControl>
+                )}
+
+                {dimOptions.acquirer.length > 1 && (
+                  <FormControl fullWidth>
+                    <InputLabel>Acquirer</InputLabel>
+                    <Select value={dimAcquirer} label="Acquirer" onChange={(e) => setDimAcquirer(e.target.value)}>
+                      <MenuItem value="All">All</MenuItem>
+                      {dimOptions.acquirer.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
+                    </Select>
+                  </FormControl>
+                )}
+
+                {dimOptions.method.length > 1 && (
+                  <FormControl fullWidth>
+                    <InputLabel>Payment Method</InputLabel>
+                    <Select value={dimMethod} label="Payment Method" onChange={(e) => setDimMethod(e.target.value)}>
+                      <MenuItem value="All">All</MenuItem>
+                      {dimOptions.method.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
+                    </Select>
+                  </FormControl>
+                )}
+
+                {dimOptions.instrument.length > 1 && (
+                  <FormControl fullWidth>
+                    <InputLabel>Instrument</InputLabel>
+                    <Select value={dimInstrument} label="Instrument" onChange={(e) => setDimInstrument(e.target.value)}>
+                      <MenuItem value="All">All</MenuItem>
+                      {dimOptions.instrument.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
+                    </Select>
+                  </FormControl>
+                )}
+
+                <TextField fullWidth label="Search series" value={seriesSearch} onChange={(e) => setSeriesSearch(e.target.value)} />
+
+                <Autocomplete
+                  multiple
+                  options={filteredSeries}
+                  value={selectedSeries}
+                  onChange={(_event, value) => setSelectedSeries(value.slice(0, 6))}
+                  getOptionLabel={(option) => option.title}
+                  isOptionEqualToValue={(option, value) => option.id === value.id}
+                  renderInput={(params) => <TextField {...params} label="Visible series" />}
+                />
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Right Column: Charts */}
+        <Grid size={{ xs: 12, md: 9 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+            <IconButton size="small" onClick={() => setIsChartFullscreen(true)} title="Fullscreen" sx={{ color: 'text.secondary' }}>
+              <FullscreenIcon />
+            </IconButton>
           </Box>
           <Grid container spacing={2}>
-            <Grid size={{ xs: 12, md: 6, lg: 3 }}>
-              <FormControl fullWidth>
-                <InputLabel>Category</InputLabel>
-                <Select value={category} label="Category" onChange={(e) => setCategory(e.target.value)}>
-                  <MenuItem value="All">All</MenuItem>
-                  {categories.map((item) => (
-                    <MenuItem key={item} value={item}>
-                      {item}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid size={{ xs: 12, md: 6, lg: 3 }}>
-              <FormControl fullWidth>
-                <InputLabel>Subcategory</InputLabel>
-                <Select
-                  value={subcategory}
-                  label="Subcategory"
-                  onChange={(e) => setSubcategory(e.target.value)}
-                >
-                  <MenuItem value="All">All</MenuItem>
-                  {subcategories.map((item) => (
-                    <MenuItem key={item} value={item}>
-                      {item}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid size={{ xs: 12, md: 6, lg: 3 }}>
-              <FormControl fullWidth>
-                <InputLabel>Measure</InputLabel>
-                <Select
-                  value={measureType}
-                  label="Measure"
-                  onChange={(e) => setMeasureType(e.target.value as 'All' | MeasureType)}
-                >
-                  <MenuItem value="All">All</MenuItem>
-                  <MenuItem value="value">Value</MenuItem>
-                  <MenuItem value="volume">Volume</MenuItem>
-                  <MenuItem value="accounts">Accounts / Stock</MenuItem>
-                  <MenuItem value="other">Other</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid size={{ xs: 12, md: 6, lg: 3 }}>
-              <FormControl fullWidth>
-                <InputLabel>Range</InputLabel>
-                <Select
-                  value={timeRange}
-                  label="Range"
-                  onChange={(e) => { setTimeRange(e.target.value as RangeOption); setCustomFrom(null); setCustomTo(null); }}
-                >
-                  <MenuItem value="2Y">2 Years</MenuItem>
-                  <MenuItem value="5Y">5 Years</MenuItem>
-                  <MenuItem value="10Y">10 Years</MenuItem>
-                  <MenuItem value="ALL">All History</MenuItem>
-                </Select>
-                {(customFrom || customTo) && (
-                  <Box sx={{ mt: 0.5, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <Typography variant="caption" color="primary">
-                      Custom: {customFrom ?? '…'} → {customTo ?? '…'}
-                    </Typography>
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ cursor: 'pointer', textDecoration: 'underline' }}
-                      onClick={() => { setCustomFrom(null); setCustomTo(null); }}
-                    >clear</Typography>
-                  </Box>
-                )}
-              </FormControl>
-            </Grid>
-            {dimOptions.segment.length > 1 && (
-              <Grid size={{ xs: 12, md: 6, lg: 3 }}>
-                <FormControl fullWidth>
-                  <InputLabel>Segment</InputLabel>
-                  <Select value={dimSegment} label="Segment" onChange={(e) => setDimSegment(e.target.value)}>
-                    <MenuItem value="All">All</MenuItem>
-                    {dimOptions.segment.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
-                  </Select>
-                </FormControl>
-              </Grid>
-            )}
-            {dimOptions.cardType.length > 1 && (
-              <Grid size={{ xs: 12, md: 6, lg: 3 }}>
-                <FormControl fullWidth>
-                  <InputLabel>Card Type</InputLabel>
-                  <Select value={dimCardType} label="Card Type" onChange={(e) => setDimCardType(e.target.value)}>
-                    <MenuItem value="All">All</MenuItem>
-                    {dimOptions.cardType.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
-                  </Select>
-                </FormControl>
-              </Grid>
-            )}
-            {dimOptions.prepaidType.length > 1 && (
-              <Grid size={{ xs: 12, md: 6, lg: 3 }}>
-                <FormControl fullWidth>
-                  <InputLabel>Prepaid Type</InputLabel>
-                  <Select value={dimPrepaidType} label="Prepaid Type" onChange={(e) => setDimPrepaidType(e.target.value)}>
-                    <MenuItem value="All">All</MenuItem>
-                    {dimOptions.prepaidType.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
-                  </Select>
-                </FormControl>
-              </Grid>
-            )}
-            {dimOptions.location.length > 1 && (
-              <Grid size={{ xs: 12, md: 6, lg: 3 }}>
-                <FormControl fullWidth>
-                  <InputLabel>Location</InputLabel>
-                  <Select value={dimLocation} label="Location" onChange={(e) => setDimLocation(e.target.value)}>
-                    <MenuItem value="All">All</MenuItem>
-                    {dimOptions.location.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
-                  </Select>
-                </FormControl>
-              </Grid>
-            )}
-            {dimOptions.acquirer.length > 1 && (
-              <Grid size={{ xs: 12, md: 6, lg: 3 }}>
-                <FormControl fullWidth>
-                  <InputLabel>Acquirer</InputLabel>
-                  <Select value={dimAcquirer} label="Acquirer" onChange={(e) => setDimAcquirer(e.target.value)}>
-                    <MenuItem value="All">All</MenuItem>
-                    {dimOptions.acquirer.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
-                  </Select>
-                </FormControl>
-              </Grid>
-            )}
-            {dimOptions.method.length > 1 && (
-              <Grid size={{ xs: 12, md: 6, lg: 3 }}>
-                <FormControl fullWidth>
-                  <InputLabel>Payment Method</InputLabel>
-                  <Select value={dimMethod} label="Payment Method" onChange={(e) => setDimMethod(e.target.value)}>
-                    <MenuItem value="All">All</MenuItem>
-                    {dimOptions.method.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
-                  </Select>
-                </FormControl>
-              </Grid>
-            )}
-            {dimOptions.instrument.length > 1 && (
-              <Grid size={{ xs: 12, md: 6, lg: 3 }}>
-                <FormControl fullWidth>
-                  <InputLabel>Instrument</InputLabel>
-                  <Select value={dimInstrument} label="Instrument" onChange={(e) => setDimInstrument(e.target.value)}>
-                    <MenuItem value="All">All</MenuItem>
-                    {dimOptions.instrument.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
-                  </Select>
-                </FormControl>
-              </Grid>
-            )}
-            <Grid size={{ xs: 12 }}>
-              <TextField
-                fullWidth
-                label="Search series"
-                value={seriesSearch}
-                onChange={(e) => setSeriesSearch(e.target.value)}
-              />
-            </Grid>
-            <Grid size={{ xs: 12 }}>
-              <Autocomplete
-                multiple
-                options={filteredSeries}
-                value={selectedSeries}
-                onChange={(_event, value) => setSelectedSeries(value.slice(0, 6))}
-                getOptionLabel={(option) => option.title}
-                isOptionEqualToValue={(option, value) => option.id === value.id}
-                renderInput={(params) => <TextField {...params} label="Visible series" />}
-              />
-            </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
-
-      <Grid container spacing={2} sx={{ mt: 0.5 }}>
         <Grid size={{ xs: 12 }}>
           <Card className="chart-card">
             <CardContent>
@@ -837,6 +906,8 @@ function App() {
               </Box>
             </CardContent>
           </Card>
+        </Grid>
+          </Grid>
         </Grid>
       </Grid>
     </Box>
