@@ -906,13 +906,40 @@ function App() {
               <FullscreenIcon />
             </IconButton>
           </Box>
+          <Card className="chart-card" sx={{ mb: 2 }}>
+            <CardContent>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+                AI Commentary
+              </Typography>
+              <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+                Live interpretation of the currently filtered view. Updates when filters, time range, or selected series change.
+              </Typography>
+              {trendInsightLoading ? (
+                <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <CircularProgress size={14} />
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>Generating commentary…</Typography>
+                </Box>
+              ) : trendInsight ? (
+                <Alert severity="info" sx={{ mt: 1.5 }}>
+                  <Typography variant="body2">{trendInsight}</Typography>
+                </Alert>
+              ) : (
+                <Typography variant="caption" sx={{ mt: 1.5, display: 'block', color: 'text.secondary' }}>
+                  Adjust filters or select series to generate commentary.
+                </Typography>
+              )}
+            </CardContent>
+          </Card>
           <Grid container spacing={2}>
         <Grid size={{ xs: 12 }}>
           <Card className="chart-card">
             <CardContent>
-              <Typography variant="h6" sx={{ mb: 2 }}>
-                Trend View
-              </Typography>
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="h6" sx={{ mb: 0.5 }}>Trend Snapshot</Typography>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                  Track how each series moves over time. Compare trends and spot inflection points across your filtered selection.
+                </Typography>
+              </Box>
               <Box className="chart-wrap">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={timelineRows}>
@@ -943,9 +970,12 @@ function App() {
         <Grid size={{ xs: 12, lg: 7 }}>
           <Card className="chart-card">
             <CardContent>
-              <Typography variant="h6" sx={{ mb: 2 }}>
-                Momentum Area
-              </Typography>
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="h6" sx={{ mb: 0.5 }}>Volume & Growth</Typography>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                  Cumulative movement of your top series. Larger areas indicate higher volume; stacking shows relative contribution.
+                </Typography>
+              </Box>
               <Box className="chart-wrap">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={timelineRows}>
@@ -974,9 +1004,12 @@ function App() {
         <Grid size={{ xs: 12, lg: 5 }}>
           <Card className="chart-card">
             <CardContent>
-              <Typography variant="h6" sx={{ mb: 2 }}>
-                Latest Monthly Snapshot
-              </Typography>
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="h6" sx={{ mb: 0.5 }}>Latest Month Rankings</Typography>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                  Current performance snapshot. Compare the most recent data point for each series, ranked by magnitude.
+                </Typography>
+              </Box>
               <Box className="chart-wrap">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={latestBySeries} layout="vertical" margin={{ left: 20, right: 12 }}>
