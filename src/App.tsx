@@ -577,7 +577,7 @@ function App() {
     return (
       <Box className="loading-wrap">
         <CircularProgress />
-        <Typography>Loading RBA original-series payments data...</Typography>
+        <Typography>Loading composite payments data...</Typography>
       </Box>
     );
   }
@@ -728,7 +728,7 @@ function App() {
           Explore Australia's Payments Ecosystem
         </Typography>
         <Typography className="hero-subtitle">
-          Deep dive into 248+ series of RBA payments data spanning Cards, Direct Entry, NPP, PayTo, and more.
+          Deep dive into a composite set of payments data spanning RBA, AusPayNet, and APRA sources.
           Ask questions in natural language. Discover trends. Make data-driven decisions.
         </Typography>
         <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>

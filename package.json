@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "data:refresh": "node scripts/build-rba-original-data.mjs",
+    "data:refresh": "node scripts/build-combined-payments-data.mjs",
     "prebuild": "npm run data:refresh",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
@@ -16,6 +16,7 @@
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^9.0.1",
     "@mui/material": "^9.0.1",
+    "cheerio": "^1.2.0",
     "date-fns": "^4.2.1",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
