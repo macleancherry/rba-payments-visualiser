@@ -95,6 +95,19 @@ function shortenLabel(label: string, max = 34) {
   return label.length <= max ? label : `${label.slice(0, max - 1)}…`;
 }
 
+function matchesSeriesSearch(series: PaymentSeries, search: string) {
+  if (!search) {
+    return true;
+  }
+
+  const haystack = `${series.title} ${series.subcategory} ${series.category}`.toLowerCase();
+  return search
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((term) => haystack.includes(term));
+}
+
 function App() {
   const [dataset, setDataset] = useState<DatasetPayload | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -123,6 +136,23 @@ function App() {
   const [customTo, setCustomTo] = useState<string | null>(null);
   const [nlAnswer, setNlAnswer] = useState<string | null>(null);
   const [nlAnswerLoading, setNlAnswerLoading] = useState(false);
+
+  const getSeriesMatches = (
+    nextCategory: string,
+    nextSubcategory: string,
+    nextMeasureType: 'All' | MeasureType,
+    nextKeywords: string,
+  ) => {
+    if (!dataset) {
+      return [] as PaymentSeries[];
+    }
+
+    return dataset.series
+      .filter((series) => nextCategory === 'All' || series.category === nextCategory)
+      .filter((series) => nextSubcategory === 'All' || series.subcategory === nextSubcategory)
+      .filter((series) => nextMeasureType === 'All' || series.measureType === nextMeasureType)
+      .filter((series) => matchesSeriesSearch(series, nextKeywords));
+  };
 
   const handleReset = () => {
     setCategory('All');
@@ -169,9 +199,12 @@ function App() {
       const newCategory = data.category ?? 'All';
       const newSubcategory = data.subcategory ?? 'All';
       const newMeasureType = (data.measureType ?? 'All') as 'All' | MeasureType;
-      const newKeywords = data.keywords ?? '';
+      const requestedKeywords = data.keywords?.trim() ?? '';
       const newFrom = (data.dateFrom || data.dateTo) ? (data.dateFrom ?? null) : null;
       const newTo = (data.dateFrom || data.dateTo) ? (data.dateTo ?? null) : null;
+      const matchesWithKeywords = getSeriesMatches(newCategory, newSubcategory, newMeasureType, requestedKeywords);
+      const matchesWithoutKeywords = getSeriesMatches(newCategory, newSubcategory, newMeasureType, '');
+      const effectiveKeywords = requestedKeywords && matchesWithKeywords.length > 0 ? requestedKeywords : '';
 
       if (data.category) setCategory(newCategory);
       if (data.subcategory) setSubcategory(newSubcategory);
@@ -184,23 +217,18 @@ function App() {
         setCustomTo(null);
         setTimeRange(data.timeRange as RangeOption);
       }
-      if (data.keywords) setSeriesSearch(newKeywords);
+      setSeriesSearch(effectiveKeywords);
       setNlResult({ explanation: data.explanation });
 
       // Compute relevant series for the answer using the new filter values
       if (dataset) {
-        const matchingSeries = dataset.series
-          .filter((s) => newCategory === 'All' || s.category === newCategory)
-          .filter((s) => newSubcategory === 'All' || s.subcategory === newSubcategory)
-          .filter((s) => newMeasureType === 'All' || s.measureType === newMeasureType)
-          .filter((s) => !newKeywords || `${s.title} ${s.subcategory} ${s.category}`.toLowerCase().includes(newKeywords.toLowerCase()))
+        const answerCandidates = (effectiveKeywords ? matchesWithKeywords : matchesWithoutKeywords);
+        const matchingSeries = answerCandidates
           .filter((s) => !s.dimensions || Object.keys(s.dimensions).length === 0) // prefer aggregates
           .slice(0, 3);
 
         const topSeries = matchingSeries.length ? matchingSeries
-          : dataset.series
-              .filter((s) => newCategory === 'All' || s.category === newCategory)
-              .filter((s) => newSubcategory === 'All' || s.subcategory === newSubcategory)
+          : matchesWithoutKeywords
               .slice(0, 2);
 
         const dateMin = newFrom ? `${newFrom}-01` : null;
@@ -283,9 +311,7 @@ function App() {
       .filter((item) => category === 'All' || item.category === category)
       .filter((item) => subcategory === 'All' || item.subcategory === subcategory)
       .filter((item) => measureType === 'All' || item.measureType === measureType)
-      .filter((item) =>
-        seriesSearch ? `${item.title} ${item.subcategory} ${item.category}`.toLowerCase().includes(seriesSearch.toLowerCase()) : true,
-      )
+      .filter((item) => matchesSeriesSearch(item, seriesSearch))
       .sort((a, b) => a.title.localeCompare(b.title));
   }, [category, dataset, measureType, seriesSearch, subcategory]);
 

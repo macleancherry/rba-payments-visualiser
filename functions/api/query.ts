@@ -64,11 +64,20 @@ Return ONLY a valid JSON object with these fields (use null for any you cannot d
   "explanation": string (brief human-readable summary of what you understood)
 }
 
+Keyword rules:
+- Use keywords only for a specific series phrase that is likely to appear in a title and is not already captured by category, subcategory, measure type, or date filters.
+- Do not put generic leftover words into keywords.
+- Do not include question words, stop words, or broad words like "payments", "transactions", "spending", "how many", "what is", "show me", "in", "for", "last".
+- If the extra wording is ambiguous or conversational, return keywords as null.
+- Prefer broader matching over over-filtering. When unsure, use null.
+
 Examples:
 - "credit card spending last 2 years" → {"category":"Cards","subcategory":"Credit and Charge","measureType":"value","timeRange":"2Y","dateFrom":null,"dateTo":null,"keywords":null,"explanation":"Credit and charge card transaction values over the last 2 years"}
 - "how many NPP payments" → {"category":"Account-to-Account","subcategory":"NPP","measureType":"volume","timeRange":null,"dateFrom":null,"dateTo":null,"keywords":null,"explanation":"NPP payment volumes"}
 - "credit card spending in December" → {"category":"Cards","subcategory":"Credit and Charge","measureType":"value","timeRange":null,"dateFrom":"2025-12","dateTo":"2025-12","keywords":null,"explanation":"Credit and charge card transaction values in December 2025"}
-- "debit card transactions in 2022" → {"category":"Cards","subcategory":"Debit","measureType":null,"timeRange":null,"dateFrom":"2022-01","dateTo":"2022-12","keywords":null,"explanation":"Debit card transactions in 2022"}`;
+- "debit card transactions in 2022" → {"category":"Cards","subcategory":"Debit","measureType":null,"timeRange":null,"dateFrom":"2022-01","dateTo":"2022-12","keywords":null,"explanation":"Debit card transactions in 2022"}
+- "contactless credit card spending" → {"category":"Cards","subcategory":"Credit and Charge","measureType":"value","timeRange":null,"dateFrom":null,"dateTo":null,"keywords":"contactless","explanation":"Contactless credit and charge card transaction values"}
+- "show me card spending please" → {"category":"Cards","subcategory":null,"measureType":"value","timeRange":null,"dateFrom":null,"dateTo":null,"keywords":null,"explanation":"Card transaction values"}`;
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   try {
