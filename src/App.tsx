@@ -157,13 +157,13 @@ function App() {
         .map((s) => ({ title: s.title, units: s.units }));
 
       const recentPoints = timelineData.slice(-6);
+      const insightQuery = `Provide a brief, single-sentence insight about the payment trends shown in this filtered data. Be specific and analytical: ${JSON.stringify(seriesInfo)}. Recent data shows: ${JSON.stringify(recentPoints)}`;
+      
       const insight = await fetch('/api/answer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          query: `Generate a brief one-sentence insight about the trend shown in this data: ${JSON.stringify(
-            seriesInfo,
-          )}. Data points: ${JSON.stringify(recentPoints)}. Be specific and analytical.`,
+          query: insightQuery,
           series: series
             .slice(0, 2)
             .map((s) => ({
@@ -469,12 +469,14 @@ function App() {
 
   useEffect(() => {
     if (selectedSeries.length > 0 && timelineRows.length > 0) {
-      generateChartInsights(selectedSeries, timelineRows);
+      if (!nlAnswerLoading) {
+        generateChartInsights(selectedSeries, timelineRows);
+      }
     } else {
       setTrendInsight(null);
       setVolumeInsight(null);
     }
-  }, [selectedSeries, timelineRows]);
+  }, [selectedSeries, timelineRows, nlAnswerLoading]);
 
   const latestBySeries = useMemo(() => {
     return selectedSeries
