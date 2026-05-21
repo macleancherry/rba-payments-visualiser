@@ -118,6 +118,8 @@ function App() {
   const [nlResult, setNlResult] = useState<{ explanation: string } | null>(null);
   const [nlError, setNlError] = useState<string | null>(null);
   const nlInputRef = useRef<HTMLInputElement>(null);
+  const [customFrom, setCustomFrom] = useState<string | null>(null);
+  const [customTo, setCustomTo] = useState<string | null>(null);
 
   const handleNlQuery = async () => {
     const q = nlQuery.trim();
@@ -134,12 +136,20 @@ function App() {
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const data = await res.json() as {
         category?: string; subcategory?: string; measureType?: string;
-        timeRange?: string; keywords?: string; explanation: string;
+        timeRange?: string; dateFrom?: string; dateTo?: string;
+        keywords?: string; explanation: string;
       };
       if (data.category) setCategory(data.category);
       if (data.subcategory) setSubcategory(data.subcategory);
       if (data.measureType) setMeasureType(data.measureType as 'All' | MeasureType);
-      if (data.timeRange) setTimeRange(data.timeRange as RangeOption);
+      if (data.dateFrom || data.dateTo) {
+        setCustomFrom(data.dateFrom ?? null);
+        setCustomTo(data.dateTo ?? null);
+      } else if (data.timeRange) {
+        setCustomFrom(null);
+        setCustomTo(null);
+        setTimeRange(data.timeRange as RangeOption);
+      }
       if (data.keywords) setSeriesSearch(data.keywords);
       setNlResult({ explanation: data.explanation });
     } catch (e) {
@@ -280,13 +290,17 @@ function App() {
     });
 
     const sortedDates = Array.from(allDates).sort();
-    const minDate =
-      timeRange === 'ALL'
-        ? null
-        : format(subYears(new Date(), RANGE_YEARS[timeRange as Exclude<RangeOption, 'ALL'>]), 'yyyy-MM-01');
+    let minDate: string | null = null;
+    let maxDate: string | null = null;
+    if (customFrom || customTo) {
+      minDate = customFrom ? `${customFrom}-01` : null;
+      maxDate = customTo ? `${customTo}-31` : null;
+    } else if (timeRange !== 'ALL') {
+      minDate = format(subYears(new Date(), RANGE_YEARS[timeRange as Exclude<RangeOption, 'ALL'>]), 'yyyy-MM-01');
+    }
 
     return sortedDates
-      .filter((date) => (minDate ? date >= minDate : true))
+      .filter((date) => (!minDate || date >= minDate) && (!maxDate || date <= maxDate))
       .map((date) => {
         const row: Record<string, number | string | null> = {
           date,
@@ -300,7 +314,7 @@ function App() {
 
         return row;
       });
-  }, [selectedSeries, timeRange]);
+  }, [selectedSeries, timeRange, customFrom, customTo]);
 
   const latestBySeries = useMemo(() => {
     return selectedSeries
@@ -496,13 +510,26 @@ function App() {
                 <Select
                   value={timeRange}
                   label="Range"
-                  onChange={(e) => setTimeRange(e.target.value as RangeOption)}
+                  onChange={(e) => { setTimeRange(e.target.value as RangeOption); setCustomFrom(null); setCustomTo(null); }}
                 >
                   <MenuItem value="2Y">2 Years</MenuItem>
                   <MenuItem value="5Y">5 Years</MenuItem>
                   <MenuItem value="10Y">10 Years</MenuItem>
                   <MenuItem value="ALL">All History</MenuItem>
                 </Select>
+                {(customFrom || customTo) && (
+                  <Box sx={{ mt: 0.5, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <Typography variant="caption" color="primary">
+                      Custom: {customFrom ?? '…'} → {customTo ?? '…'}
+                    </Typography>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ cursor: 'pointer', textDecoration: 'underline' }}
+                      onClick={() => { setCustomFrom(null); setCustomTo(null); }}
+                    >clear</Typography>
+                  </Box>
+                )}
               </FormControl>
             </Grid>
             {dimOptions.segment.length > 1 && (

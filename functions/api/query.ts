@@ -11,6 +11,8 @@ interface QueryResponse {
   subcategory: string | null;
   measureType: string | null;
   timeRange: string | null;
+  dateFrom: string | null;
+  dateTo: string | null;
   keywords: string | null;
   explanation: string;
 }
@@ -38,11 +40,17 @@ Available measure types:
 - accounts (cards on issue, account counts)
 - other
 
-Available time ranges:
-- 2Y (2 years)
-- 5Y (5 years)
-- 10Y (10 years)
-- ALL (all available history)
+The current date is May 2026.
+
+For time filtering, use EITHER a preset timeRange OR specific dateFrom/dateTo — not both:
+- timeRange presets: 2Y (last 2 years), 5Y (last 5 years), 10Y (last 10 years), ALL (all history)
+- dateFrom / dateTo: specific date range in YYYY-MM format for queries referencing a specific month, year, or period
+  - "in December" → assume December of the most recent past year (2025): dateFrom="2025-12", dateTo="2025-12"
+  - "in December 2023" → dateFrom="2023-12", dateTo="2023-12"
+  - "in 2023" → dateFrom="2023-01", dateTo="2023-12"
+  - "2022 to 2024" → dateFrom="2022-01", dateTo="2024-12"
+  - "since 2020" → dateFrom="2020-01", dateTo=null
+  - "last 2 years" → timeRange="2Y", dateFrom=null, dateTo=null
 
 Return ONLY a valid JSON object with these fields (use null for any you cannot determine):
 {
@@ -50,15 +58,17 @@ Return ONLY a valid JSON object with these fields (use null for any you cannot d
   "subcategory": string or null,
   "measureType": string or null,
   "timeRange": string or null,
+  "dateFrom": string or null,
+  "dateTo": string or null,
   "keywords": string or null,
   "explanation": string (brief human-readable summary of what you understood)
 }
 
 Examples:
-- "credit card spending last 2 years" → {"category":"Cards","subcategory":"Credit and Charge","measureType":"value","timeRange":"2Y","keywords":null,"explanation":"Credit and charge card transaction values over the last 2 years"}
-- "how many NPP payments" → {"category":"Account-to-Account","subcategory":"NPP","measureType":"volume","timeRange":null,"keywords":null,"explanation":"NPP payment volumes"}
-- "debit card contactless transactions" → {"category":"Cards","subcategory":"Debit","measureType":null,"timeRange":null,"keywords":"contactless","explanation":"Debit card contactless transactions"}
-- "cards on issue" → {"category":"Cards","subcategory":null,"measureType":"accounts","timeRange":null,"keywords":"cards on issue","explanation":"Cards on issue across card types"}`;
+- "credit card spending last 2 years" → {"category":"Cards","subcategory":"Credit and Charge","measureType":"value","timeRange":"2Y","dateFrom":null,"dateTo":null,"keywords":null,"explanation":"Credit and charge card transaction values over the last 2 years"}
+- "how many NPP payments" → {"category":"Account-to-Account","subcategory":"NPP","measureType":"volume","timeRange":null,"dateFrom":null,"dateTo":null,"keywords":null,"explanation":"NPP payment volumes"}
+- "credit card spending in December" → {"category":"Cards","subcategory":"Credit and Charge","measureType":"value","timeRange":null,"dateFrom":"2025-12","dateTo":"2025-12","keywords":null,"explanation":"Credit and charge card transaction values in December 2025"}
+- "debit card transactions in 2022" → {"category":"Cards","subcategory":"Debit","measureType":null,"timeRange":null,"dateFrom":"2022-01","dateTo":"2022-12","keywords":null,"explanation":"Debit card transactions in 2022"}`;
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   try {
