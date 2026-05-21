@@ -120,6 +120,8 @@ function App() {
   const nlInputRef = useRef<HTMLInputElement>(null);
   const [customFrom, setCustomFrom] = useState<string | null>(null);
   const [customTo, setCustomTo] = useState<string | null>(null);
+  const [nlAnswer, setNlAnswer] = useState<string | null>(null);
+  const [nlAnswerLoading, setNlAnswerLoading] = useState(false);
 
   const handleNlQuery = async () => {
     const q = nlQuery.trim();
@@ -127,6 +129,7 @@ function App() {
     setNlLoading(true);
     setNlError(null);
     setNlResult(null);
+    setNlAnswer(null);
     try {
       const res = await fetch('/api/query', {
         method: 'POST',
@@ -139,19 +142,68 @@ function App() {
         timeRange?: string; dateFrom?: string; dateTo?: string;
         keywords?: string; explanation: string;
       };
-      if (data.category) setCategory(data.category);
-      if (data.subcategory) setSubcategory(data.subcategory);
-      if (data.measureType) setMeasureType(data.measureType as 'All' | MeasureType);
-      if (data.dateFrom || data.dateTo) {
-        setCustomFrom(data.dateFrom ?? null);
-        setCustomTo(data.dateTo ?? null);
+
+      const newCategory = data.category ?? 'All';
+      const newSubcategory = data.subcategory ?? 'All';
+      const newMeasureType = (data.measureType ?? 'All') as 'All' | MeasureType;
+      const newKeywords = data.keywords ?? '';
+      const newFrom = (data.dateFrom || data.dateTo) ? (data.dateFrom ?? null) : null;
+      const newTo = (data.dateFrom || data.dateTo) ? (data.dateTo ?? null) : null;
+
+      if (data.category) setCategory(newCategory);
+      if (data.subcategory) setSubcategory(newSubcategory);
+      if (data.measureType) setMeasureType(newMeasureType);
+      if (newFrom || newTo) {
+        setCustomFrom(newFrom);
+        setCustomTo(newTo);
       } else if (data.timeRange) {
         setCustomFrom(null);
         setCustomTo(null);
         setTimeRange(data.timeRange as RangeOption);
       }
-      if (data.keywords) setSeriesSearch(data.keywords);
+      if (data.keywords) setSeriesSearch(newKeywords);
       setNlResult({ explanation: data.explanation });
+
+      // Compute relevant series for the answer using the new filter values
+      if (dataset) {
+        const matchingSeries = dataset.series
+          .filter((s) => newCategory === 'All' || s.category === newCategory)
+          .filter((s) => newSubcategory === 'All' || s.subcategory === newSubcategory)
+          .filter((s) => newMeasureType === 'All' || s.measureType === newMeasureType)
+          .filter((s) => !newKeywords || `${s.title} ${s.subcategory} ${s.category}`.toLowerCase().includes(newKeywords.toLowerCase()))
+          .filter((s) => !s.dimensions || Object.keys(s.dimensions).length === 0) // prefer aggregates
+          .slice(0, 3);
+
+        const topSeries = matchingSeries.length ? matchingSeries
+          : dataset.series
+              .filter((s) => newCategory === 'All' || s.category === newCategory)
+              .filter((s) => newSubcategory === 'All' || s.subcategory === newSubcategory)
+              .slice(0, 2);
+
+        const dateMin = newFrom ? `${newFrom}-01` : null;
+        const dateMax = newTo ? `${newTo}-31` : null;
+
+        const seriesPayload = topSeries.map((s) => ({
+          title: s.title,
+          units: s.units,
+          points: s.points
+            .filter((p) => (!dateMin || p.date >= dateMin) && (!dateMax || p.date <= dateMax))
+            .slice(-24),
+        }));
+
+        if (seriesPayload.some((s) => s.points.length > 0)) {
+          setNlAnswerLoading(true);
+          fetch('/api/answer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: q, series: seriesPayload }),
+          })
+            .then((r) => r.json() as Promise<{ answer?: string; error?: string }>)
+            .then((d) => setNlAnswer(d.answer ?? null))
+            .catch(() => setNlAnswer(null))
+            .finally(() => setNlAnswerLoading(false));
+        }
+      }
     } catch (e) {
       setNlError(e instanceof Error ? e.message : 'Unknown error');
     } finally {
@@ -446,6 +498,17 @@ function App() {
             <Typography variant="caption" sx={{ mt: 1, display: 'block', color: 'text.secondary' }}>
               ✓ {nlResult.explanation}
             </Typography>
+          )}
+          {nlAnswerLoading && (
+            <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+              <CircularProgress size={14} />
+              <Typography variant="caption" color="text.secondary">Generating answer…</Typography>
+            </Box>
+          )}
+          {nlAnswer && (
+            <Alert severity="info" sx={{ mt: 1 }}>
+              <Typography variant="body2">{nlAnswer}</Typography>
+            </Alert>
           )}
           {nlError && (
             <Typography variant="caption" sx={{ mt: 1, display: 'block', color: 'error.main' }}>
