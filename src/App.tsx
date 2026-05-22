@@ -1116,93 +1116,6 @@ function App() {
                   </FormControl>
                 )}
 
-                <Box sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1.5, backgroundColor: 'rgba(15, 76, 129, 0.03)' }}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-                    Visible series ({selectedSeries.length} selected, {plottedSeries.length} plotted)
-                  </Typography>
-                  <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mt: 0.5, mb: 1 }}>
-                    Use filters first, then tick exactly what you want in the charts.
-                  </Typography>
-                  <Stack direction="row" spacing={1} sx={{ mb: 1.25, alignItems: 'center' }}>
-                    <TextField
-                      fullWidth
-                      size="small"
-                      label="Search available series"
-                      placeholder="Type keywords (for example: payto, eftpos, debit)"
-                      value={seriesSearch}
-                      onChange={(e) => setSeriesSearch(e.target.value)}
-                    />
-                    {seriesSearch && (
-                      <Button size="small" color="inherit" onClick={() => setSeriesSearch('')}>
-                        Clear search
-                      </Button>
-                    )}
-                  </Stack>
-                  {seriesSearch && (
-                    <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mb: 1 }}>
-                      Showing {filteredSeries.length} matching series.
-                    </Typography>
-                  )}
-                  <Stack direction="row" spacing={1} sx={{ mb: 1.25, flexWrap: 'wrap' }}>
-                    <Button size="small" variant="outlined" onClick={() => setSelectedSeries(filteredSeries)}>
-                      Select all filtered ({filteredSeries.length})
-                    </Button>
-                    <Button size="small" color="inherit" onClick={() => setSelectedSeries([])}>
-                      Clear
-                    </Button>
-                  </Stack>
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        size="small"
-                        checked={showAllPlotted}
-                        onChange={(_event, checked) => setShowAllPlotted(checked)}
-                        disabled={selectedSeries.length <= MAX_PLOTTED_SERIES}
-                      />
-                    }
-                    label={showAllPlotted ? 'Plot all selected series' : `Plot top ${MAX_PLOTTED_SERIES} by latest value`}
-                    sx={{ m: 0, mb: 1 }}
-                  />
-                  {useDualMeasureAxes && (
-                    <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mb: 1 }}>
-                      Dual-axis mode is on: values are shown on the left axis, counts on the right axis.
-                    </Typography>
-                  )}
-                  <Box sx={{ maxHeight: 260, overflowY: 'auto', pr: 0.5 }}>
-                    <FormGroup>
-                      {filteredSeries.slice(0, MAX_SERIES_CHECKBOX_ROWS).map((series) => (
-                        <FormControlLabel
-                          key={series.id}
-                          control={
-                            <Checkbox
-                              size="small"
-                              checked={selectedSeriesIdSet.has(series.id)}
-                              onChange={(_event, checked) => {
-                                setSelectedSeries((current) => {
-                                  if (checked) {
-                                    if (current.some((item) => item.id === series.id)) {
-                                      return current;
-                                    }
-                                    return [...current, series];
-                                  }
-
-                                  return current.filter((item) => item.id !== series.id);
-                                });
-                              }}
-                            />
-                          }
-                          label={series.title}
-                          sx={{ alignItems: 'flex-start', m: 0 }}
-                        />
-                      ))}
-                    </FormGroup>
-                  </Box>
-                  {filteredSeries.length > MAX_SERIES_CHECKBOX_ROWS && (
-                    <Typography variant="caption" sx={{ mt: 1, display: 'block', color: 'text.secondary' }}>
-                      Showing first {MAX_SERIES_CHECKBOX_ROWS} options here. Refine filters to narrow the list.
-                    </Typography>
-                  )}
-                </Box>
               </Stack>
             </CardContent>
           </Card>
@@ -1210,6 +1123,93 @@ function App() {
 
         {/* Right Column: Charts */}
         <Grid size={{ xs: 12, md: 9 }}>
+          <Card sx={{ mb: 1.5, border: '1px solid', borderColor: 'divider' }}>
+            <CardContent sx={{ pb: '12px !important' }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                Visible series ({selectedSeries.length} selected, {plottedSeries.length} plotted)
+              </Typography>
+              <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mt: 0.5, mb: 1 }}>
+                Choose exactly which series appear in the charts below.
+              </Typography>
+              <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1} sx={{ mb: 1.25, alignItems: { lg: 'center' } }}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Search available series"
+                  placeholder="Type keywords (for example: payto, eftpos, debit)"
+                  value={seriesSearch}
+                  onChange={(e) => setSeriesSearch(e.target.value)}
+                />
+                {seriesSearch && (
+                  <Button size="small" color="inherit" onClick={() => setSeriesSearch('')}>
+                    Clear search
+                  </Button>
+                )}
+                <Button size="small" variant="outlined" onClick={() => setSelectedSeries(filteredSeries)}>
+                  Select all filtered ({filteredSeries.length})
+                </Button>
+                <Button size="small" color="inherit" onClick={() => setSelectedSeries([])}>
+                  Clear
+                </Button>
+              </Stack>
+              {seriesSearch && (
+                <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mb: 1 }}>
+                  Showing {filteredSeries.length} matching series.
+                </Typography>
+              )}
+              <FormControlLabel
+                control={
+                  <Switch
+                    size="small"
+                    checked={showAllPlotted}
+                    onChange={(_event, checked) => setShowAllPlotted(checked)}
+                    disabled={selectedSeries.length <= MAX_PLOTTED_SERIES}
+                  />
+                }
+                label={showAllPlotted ? 'Plot all selected series' : `Plot top ${MAX_PLOTTED_SERIES} by latest value`}
+                sx={{ m: 0, mb: 1 }}
+              />
+              {useDualMeasureAxes && (
+                <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mb: 1 }}>
+                  Dual-axis mode is on: values are shown on the left axis, counts on the right axis.
+                </Typography>
+              )}
+              <Box sx={{ maxHeight: 180, overflowY: 'auto', pr: 0.5 }}>
+                <FormGroup row sx={{ columnGap: 1.5 }}>
+                  {filteredSeries.slice(0, MAX_SERIES_CHECKBOX_ROWS).map((series) => (
+                    <FormControlLabel
+                      key={series.id}
+                      control={
+                        <Checkbox
+                          size="small"
+                          checked={selectedSeriesIdSet.has(series.id)}
+                          onChange={(_event, checked) => {
+                            setSelectedSeries((current) => {
+                              if (checked) {
+                                if (current.some((item) => item.id === series.id)) {
+                                  return current;
+                                }
+                                return [...current, series];
+                              }
+
+                              return current.filter((item) => item.id !== series.id);
+                            });
+                          }}
+                        />
+                      }
+                      label={series.title}
+                      sx={{ alignItems: 'flex-start', m: 0, minWidth: { xs: '100%', lg: '48%' } }}
+                    />
+                  ))}
+                </FormGroup>
+              </Box>
+              {filteredSeries.length > MAX_SERIES_CHECKBOX_ROWS && (
+                <Typography variant="caption" sx={{ mt: 1, display: 'block', color: 'text.secondary' }}>
+                  Showing first {MAX_SERIES_CHECKBOX_ROWS} options here. Refine filters to narrow the list.
+                </Typography>
+              )}
+            </CardContent>
+          </Card>
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
             <IconButton size="small" onClick={() => setIsChartFullscreen(true)} title="Fullscreen" sx={{ color: 'text.secondary' }}>
               <FullscreenIcon />
