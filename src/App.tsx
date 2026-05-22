@@ -1115,8 +1115,6 @@ function App() {
                   </FormControl>
                 )}
 
-                <TextField fullWidth label="Search series" value={seriesSearch} onChange={(e) => setSeriesSearch(e.target.value)} />
-
                 <Box sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1.5, backgroundColor: 'rgba(15, 76, 129, 0.03)' }}>
                   <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
                     Visible series ({selectedSeries.length} selected, {plottedSeries.length} plotted)
@@ -1124,6 +1122,26 @@ function App() {
                   <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mt: 0.5, mb: 1 }}>
                     Use filters first, then tick exactly what you want in the charts.
                   </Typography>
+                  <Stack direction="row" spacing={1} sx={{ mb: 1.25, alignItems: 'center' }}>
+                    <TextField
+                      fullWidth
+                      size="small"
+                      label="Search available series"
+                      placeholder="Type keywords (for example: payto, eftpos, debit)"
+                      value={seriesSearch}
+                      onChange={(e) => setSeriesSearch(e.target.value)}
+                    />
+                    {seriesSearch && (
+                      <Button size="small" color="inherit" onClick={() => setSeriesSearch('')}>
+                        Clear search
+                      </Button>
+                    )}
+                  </Stack>
+                  {seriesSearch && (
+                    <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mb: 1 }}>
+                      Showing {filteredSeries.length} matching series.
+                    </Typography>
+                  )}
                   <Stack direction="row" spacing={1} sx={{ mb: 1.25, flexWrap: 'wrap' }}>
                     <Button size="small" variant="outlined" onClick={() => setSelectedSeries(filteredSeries)}>
                       Select all filtered ({filteredSeries.length})
