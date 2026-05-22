@@ -99,7 +99,111 @@ function formatSeriesValue(value: number, units: string) {
   return `${isCurrency ? '$' : ''}${compact}`;
 }
 
+function calculateChanges(points: { date: string; value: number }[]) {
+  const out: Array<{ date: string; delta: number; pct: number | null }> = [];
+  for (let i = 1; i < points.length; i += 1) {
+    const prev = points[i - 1].value;
+    const curr = points[i].value;
+    const delta = curr - prev;
+    const pct = prev === 0 ? null : (delta / Math.abs(prev)) * 100;
+    out.push({ date: points[i].date, delta, pct });
+  }
+  return out;
+}
+
+function pickSeriesByTitle(series: SeriesSummary[], keyword: string) {
+  const lower = keyword.toLowerCase();
+  return series.find((s) => s.title.toLowerCase().includes(lower)) ?? null;
+}
+
+function answerGrowthSpike(series: SeriesSummary[]) {
+  let best: { title: string; date: string; pct: number } | null = null;
+
+  for (const s of series) {
+    const changes = calculateChanges(s.points.filter((p) => Number.isFinite(p.value)));
+    for (const c of changes) {
+      if (c.pct === null) continue;
+      if (!best || c.pct > best.pct) {
+        best = { title: s.title, date: c.date, pct: c.pct };
+      }
+    }
+  }
+
+  if (!best) {
+    return null;
+  }
+
+  return `The biggest growth spike occurred in ${formatPeriod(best.date)}, when ${best.title} rose ${best.pct.toFixed(1)}% versus the prior period.`;
+}
+
+function answerMomentumOvertake(series: SeriesSummary[]) {
+  const npp = pickSeriesByTitle(series, 'npp') ?? series[0] ?? null;
+  const directEntry = pickSeriesByTitle(series, 'direct entry') ?? series.find((s) => s !== npp) ?? null;
+  if (!npp || !directEntry) {
+    return null;
+  }
+
+  const nppChanges = calculateChanges(npp.points.filter((p) => Number.isFinite(p.value)));
+  const deChanges = calculateChanges(directEntry.points.filter((p) => Number.isFinite(p.value)));
+  const nppLatest = nppChanges[nppChanges.length - 1];
+  const deLatest = deChanges[deChanges.length - 1];
+
+  if (!nppLatest || !deLatest || nppLatest.pct === null || deLatest.pct === null) {
+    return null;
+  }
+
+  const overtaken = nppLatest.pct > deLatest.pct;
+  const comparator = overtaken ? 'faster than' : 'slower than';
+  return `${overtaken ? 'Yes' : 'Not yet'} — in the latest period, NPP momentum is ${comparator} direct entry (${nppLatest.pct.toFixed(1)}% vs ${deLatest.pct.toFixed(1)}%).`;
+}
+
+function answerSustainedAcceleration(series: SeriesSummary[]) {
+  const payTo = pickSeriesByTitle(series, 'payto') ?? series[0] ?? null;
+  if (!payTo) {
+    return null;
+  }
+
+  const changes = calculateChanges(payTo.points.filter((p) => Number.isFinite(p.value)));
+  if (changes.length < 3) {
+    return null;
+  }
+
+  const recent = changes.slice(-3);
+  const positiveCount = recent.filter((c) => c.delta > 0).length;
+  const sustained = positiveCount >= 2;
+  const latest = recent[recent.length - 1];
+  const latestPct = latest.pct === null ? null : latest.pct.toFixed(1);
+
+  if (latestPct === null) {
+    return null;
+  }
+
+  return `${sustained ? 'Yes, mostly' : 'Not consistently'} — PayTo has risen in ${positiveCount} of the last 3 periods, with the latest move ${latestPct}% in ${formatPeriod(latest.date)}.`;
+}
+
 function buildDeterministicAnswer(_query: string, series: SeriesSummary[]) {
+  const query = _query.toLowerCase();
+  if (/spike|biggest increase|max(imum)? increase|growth spike/.test(query)) {
+    const spikeAnswer = answerGrowthSpike(series);
+    if (spikeAnswer) {
+      return spikeAnswer;
+    }
+  }
+
+  if (/overtaken|overtake|momentum/.test(query) && /npp|direct entry/.test(query)) {
+    const momentumAnswer = answerMomentumOvertake(series);
+    if (momentumAnswer) {
+      return momentumAnswer;
+    }
+  }
+
+  if (/acceleration|accelerating|sustained/.test(query) && /payto/.test(query)) {
+    const accelerationAnswer = answerSustainedAcceleration(series);
+    if (accelerationAnswer) {
+      return accelerationAnswer;
+    }
+  }
+
   const lines = series
     .slice(0, 2)
     .map((s) => {
