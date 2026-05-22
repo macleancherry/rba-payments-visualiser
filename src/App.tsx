@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  Autocomplete,
   Box,
   Button,
   Card,
   CardContent,
+  Checkbox,
   Chip,
   CircularProgress,
   FormControl,
+  FormControlLabel,
+  FormGroup,
   Grid,
   IconButton,
   InputAdornment,
@@ -16,6 +18,7 @@ import {
   MenuItem,
   Select,
   Stack,
+  Switch,
   TextField,
   Typography,
 } from '@mui/material';
@@ -79,6 +82,8 @@ type DatasetPayload = {
 };
 
 const SERIES_COLORS = ['#0f4c81', '#11b5a4', '#ff7a59', '#0a2f5a', '#23a6d5', '#f4b400'];
+const MAX_SERIES_CHECKBOX_ROWS = 120;
+const MAX_PLOTTED_SERIES = 8;
 const DEFAULT_SELECTED_SERIES_TITLES = [
   'Debit: Value of purchases',
   'Credit and Charge: Value of purchases',
@@ -191,6 +196,7 @@ function App() {
   const [seriesSearch, setSeriesSearch] = useState('');
   const [timeRange, setTimeRange] = useState<RangeOption>('ALL');
   const [selectedSeries, setSelectedSeries] = useState<PaymentSeries[]>([]);
+  const [showAllPlotted, setShowAllPlotted] = useState(false);
 
   const [dimSegment, setDimSegment] = useState('All');
   const [dimCardType, setDimCardType] = useState('All');
@@ -294,6 +300,7 @@ function App() {
     setNlResult(null);
     setNlError(null);
     setNlAnswer(null);
+    setShowAllPlotted(false);
     setSelectedSeries([]);
   };
 
@@ -513,14 +520,33 @@ function App() {
     });
   }, [filteredSeries]);
 
-  const hasValueSeries = useMemo(
-    () => selectedSeries.some((series) => series.measureType === 'value'),
+  const selectedSeriesIdSet = useMemo(
+    () => new Set(selectedSeries.map((series) => series.id)),
     [selectedSeries],
   );
 
+  const plottedSeries = useMemo(() => {
+    if (showAllPlotted || selectedSeries.length <= MAX_PLOTTED_SERIES) {
+      return selectedSeries;
+    }
+
+    return [...selectedSeries]
+      .sort((a, b) => {
+        const aLatest = a.points[a.points.length - 1]?.value ?? Number.NEGATIVE_INFINITY;
+        const bLatest = b.points[b.points.length - 1]?.value ?? Number.NEGATIVE_INFINITY;
+        return bLatest - aLatest;
+      })
+      .slice(0, MAX_PLOTTED_SERIES);
+  }, [selectedSeries, showAllPlotted]);
+
+  const hasValueSeries = useMemo(
+    () => plottedSeries.some((series) => series.measureType === 'value'),
+    [plottedSeries],
+  );
+
   const hasNonValueSeries = useMemo(
-    () => selectedSeries.some((series) => series.measureType !== 'value'),
-    [selectedSeries],
+    () => plottedSeries.some((series) => series.measureType !== 'value'),
+    [plottedSeries],
   );
 
   const useDualMeasureAxes = hasValueSeries && hasNonValueSeries;
@@ -534,12 +560,12 @@ function App() {
   };
 
   const timelineRows = useMemo(() => {
-    if (!selectedSeries.length) {
+    if (!plottedSeries.length) {
       return [] as Array<Record<string, number | string | null>>;
     }
 
     const allDates = new Set<string>();
-    selectedSeries.forEach((series) => {
+    plottedSeries.forEach((series) => {
       series.points.forEach((point) => allDates.add(point.date));
     });
 
@@ -561,28 +587,28 @@ function App() {
           label: format(parseISO(date), 'MMM yyyy'),
         };
 
-        selectedSeries.forEach((series) => {
+        plottedSeries.forEach((series) => {
           const match = series.points.find((point) => point.date === date);
           row[series.id] = match?.value ?? null;
         });
 
         return row;
       });
-  }, [selectedSeries, timeRange, customFrom, customTo]);
+  }, [plottedSeries, timeRange, customFrom, customTo]);
 
   useEffect(() => {
-    if (selectedSeries.length > 0 && timelineRows.length > 0) {
+    if (plottedSeries.length > 0 && timelineRows.length > 0) {
       if (!nlAnswerLoading) {
-        generateChartInsights(selectedSeries, timelineRows);
+        generateChartInsights(plottedSeries, timelineRows);
       }
     } else {
       setTrendInsight(null);
       setVolumeInsight(null);
     }
-  }, [selectedSeries, timelineRows, nlAnswerLoading]);
+  }, [plottedSeries, timelineRows, nlAnswerLoading]);
 
   const latestBySeries = useMemo(() => {
-    return selectedSeries
+    return plottedSeries
       .map((series) => ({
         label: shortenLabel(series.title),
         title: series.title,
@@ -591,15 +617,15 @@ function App() {
       }))
       .filter((item) => item.value !== undefined)
       .slice(0, 10);
-  }, [selectedSeries]);
+  }, [plottedSeries]);
 
   const unitsBySeriesId = useMemo(() => {
-    return new Map(selectedSeries.map((series) => [series.id, series.units]));
-  }, [selectedSeries]);
+    return new Map(plottedSeries.map((series) => [series.id, series.units]));
+  }, [plottedSeries]);
 
   const unitsBySeriesTitle = useMemo(() => {
-    return new Map(selectedSeries.map((series) => [series.title, series.units]));
-  }, [selectedSeries]);
+    return new Map(plottedSeries.map((series) => [series.title, series.units]));
+  }, [plottedSeries]);
 
   const resolveTooltipUnits = (name: string, item?: { dataKey?: string }) => {
     const dataKey = String(item?.dataKey ?? '');
@@ -726,7 +752,7 @@ function App() {
                       }}
                     />
                     <Legend />
-                    {selectedSeries.map((series, idx) => (
+                    {plottedSeries.map((series, idx) => (
                       <Line
                         key={series.id}
                         type="monotone"
@@ -782,7 +808,7 @@ function App() {
                             return formatValue(Number(value), units);
                           }}
                         />
-                        {selectedSeries.slice(0, 2).map((series, idx) => (
+                        {plottedSeries.slice(0, 2).map((series, idx) => (
                           <Area
                             key={series.id}
                             type="monotone"
@@ -1091,15 +1117,73 @@ function App() {
 
                 <TextField fullWidth label="Search series" value={seriesSearch} onChange={(e) => setSeriesSearch(e.target.value)} />
 
-                <Autocomplete
-                  multiple
-                  options={filteredSeries}
-                  value={selectedSeries}
-                  onChange={(_event, value) => setSelectedSeries(value.slice(0, 6))}
-                  getOptionLabel={(option) => option.title}
-                  isOptionEqualToValue={(option, value) => option.id === value.id}
-                  renderInput={(params) => <TextField {...params} label="Visible series" />}
-                />
+                <Box sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1.5, backgroundColor: 'rgba(15, 76, 129, 0.03)' }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                    Visible series ({selectedSeries.length} selected, {plottedSeries.length} plotted)
+                  </Typography>
+                  <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mt: 0.5, mb: 1 }}>
+                    Use filters first, then tick exactly what you want in the charts.
+                  </Typography>
+                  <Stack direction="row" spacing={1} sx={{ mb: 1.25, flexWrap: 'wrap' }}>
+                    <Button size="small" variant="outlined" onClick={() => setSelectedSeries(filteredSeries)}>
+                      Select all filtered ({filteredSeries.length})
+                    </Button>
+                    <Button size="small" color="inherit" onClick={() => setSelectedSeries([])}>
+                      Clear
+                    </Button>
+                  </Stack>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        size="small"
+                        checked={showAllPlotted}
+                        onChange={(_event, checked) => setShowAllPlotted(checked)}
+                        disabled={selectedSeries.length <= MAX_PLOTTED_SERIES}
+                      />
+                    }
+                    label={showAllPlotted ? 'Plot all selected series' : `Plot top ${MAX_PLOTTED_SERIES} by latest value`}
+                    sx={{ m: 0, mb: 1 }}
+                  />
+                  {useDualMeasureAxes && (
+                    <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mb: 1 }}>
+                      Dual-axis mode is on: values are shown on the left axis, counts on the right axis.
+                    </Typography>
+                  )}
+                  <Box sx={{ maxHeight: 260, overflowY: 'auto', pr: 0.5 }}>
+                    <FormGroup>
+                      {filteredSeries.slice(0, MAX_SERIES_CHECKBOX_ROWS).map((series) => (
+                        <FormControlLabel
+                          key={series.id}
+                          control={
+                            <Checkbox
+                              size="small"
+                              checked={selectedSeriesIdSet.has(series.id)}
+                              onChange={(_event, checked) => {
+                                setSelectedSeries((current) => {
+                                  if (checked) {
+                                    if (current.some((item) => item.id === series.id)) {
+                                      return current;
+                                    }
+                                    return [...current, series];
+                                  }
+
+                                  return current.filter((item) => item.id !== series.id);
+                                });
+                              }}
+                            />
+                          }
+                          label={series.title}
+                          sx={{ alignItems: 'flex-start', m: 0 }}
+                        />
+                      ))}
+                    </FormGroup>
+                  </Box>
+                  {filteredSeries.length > MAX_SERIES_CHECKBOX_ROWS && (
+                    <Typography variant="caption" sx={{ mt: 1, display: 'block', color: 'text.secondary' }}>
+                      Showing first {MAX_SERIES_CHECKBOX_ROWS} options here. Refine filters to narrow the list.
+                    </Typography>
+                  )}
+                </Box>
               </Stack>
             </CardContent>
           </Card>
@@ -1142,7 +1226,7 @@ function App() {
                       }}
                     />
                     <Legend />
-                    {selectedSeries.map((series, idx) => (
+                    {plottedSeries.map((series, idx) => (
                       <Line
                         key={series.id}
                         type="monotone"
@@ -1201,7 +1285,7 @@ function App() {
                         return formatValue(Number(value), units);
                       }}
                     />
-                    {selectedSeries.slice(0, 2).map((series, idx) => (
+                    {plottedSeries.slice(0, 2).map((series, idx) => (
                       <Area
                         key={series.id}
                         type="monotone"
