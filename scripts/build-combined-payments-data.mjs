@@ -20,6 +20,14 @@ function cleanText(value) {
     .trim();
 }
 
+function extractTableCellText($, cell) {
+  const clone = $(cell).clone();
+  // Device statistics tables include footnote superscripts inside numeric cells.
+  // Remove them so values like "23,518" do not become "235181".
+  clone.find('sup').remove();
+  return cleanText(clone.text());
+}
+
 function parseNumber(value) {
   if (value === null || value === undefined) return null;
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -199,7 +207,7 @@ async function buildDeviceSeries() {
         $(row)
           .find('th, td')
           .toArray()
-          .map((cell) => cleanText($(cell).text())),
+          .map((cell) => extractTableCellText($, cell)),
       )
       .filter((row) => row.some(Boolean));
 
