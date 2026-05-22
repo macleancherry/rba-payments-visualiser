@@ -52,7 +52,7 @@ function buildSeriesSignature(series: SeriesSummary[]) {
 
 function buildCacheKey(query: string, datasetVersion: string | undefined, series: SeriesSummary[]) {
   const payloadSig = `${normalizeQuery(query)}::${buildSeriesSignature(series)}`;
-  return `answer:v2:${normalizeDatasetVersion(datasetVersion)}:${hashString(payloadSig)}`;
+  return `answer:v3:${normalizeDatasetVersion(datasetVersion)}:${hashString(payloadSig)}`;
 }
 
 function buildEdgeRequest(cacheKey: string) {
@@ -183,8 +183,82 @@ function answerSustainedAcceleration(series: SeriesSummary[]) {
   return `${sustained ? 'Yes, mostly' : 'Not consistently'} — PayTo has risen in ${positiveCount} of the last 3 periods, with the latest move ${latestPct}% in ${formatPeriod(latest.date)}.`;
 }
 
+function toKeywords(text: string) {
+  return normalizeQuery(text)
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 3)
+    .filter((w) => !['which', 'month', 'highest', 'lowest', 'what', 'when', 'does', 'did', 'the', 'and', 'for', 'with', 'from', 'over', 'last'].includes(w));
+}
+
+function findBestSeriesForQuery(query: string, series: SeriesSummary[]) {
+  const queryWords = new Set(toKeywords(query));
+  if (!queryWords.size) {
+    return series[0] ?? null;
+  }
+
+  let best: { series: SeriesSummary; score: number } | null = null;
+  for (const s of series) {
+    const titleWords = new Set(toKeywords(s.title));
+    let score = 0;
+    for (const word of queryWords) {
+      if (titleWords.has(word)) {
+        score += 2;
+      } else if (s.title.toLowerCase().includes(word)) {
+        score += 1;
+      }
+    }
+
+    if (!best || score > best.score) {
+      best = { series: s, score };
+    }
+  }
+
+  return best?.score ? best.series : series[0] ?? null;
+}
+
+function answerExtremeMonth(query: string, series: SeriesSummary[], kind: 'highest' | 'lowest') {
+  const target = findBestSeriesForQuery(query, series);
+  if (!target) {
+    return null;
+  }
+
+  const pts = target.points.filter((p) => Number.isFinite(p.value));
+  if (!pts.length) {
+    return null;
+  }
+
+  const chosen = pts.reduce((acc, cur) => {
+    if (!acc) return cur;
+    if (kind === 'highest') {
+      return cur.value > acc.value ? cur : acc;
+    }
+    return cur.value < acc.value ? cur : acc;
+  }, null as { date: string; value: number } | null);
+
+  if (!chosen) {
+    return null;
+  }
+
+  return `For ${target.title}, the ${kind} month in the current analysis window is ${formatPeriod(chosen.date)} at ${formatSeriesValue(chosen.value, target.units)}.`;
+}
+
 function buildDeterministicAnswer(_query: string, series: SeriesSummary[]) {
   const query = _query.toLowerCase();
+  if (/highest|max(imum)?|peak|top/.test(query) && /month/.test(query)) {
+    const highest = answerExtremeMonth(query, series, 'highest');
+    if (highest) {
+      return highest;
+    }
+  }
+
+  if (/lowest|min(imum)?|trough|bottom/.test(query) && /month/.test(query)) {
+    const lowest = answerExtremeMonth(query, series, 'lowest');
+    if (lowest) {
+      return lowest;
+    }
+  }
+
   if (/spike|biggest increase|max(imum)? increase|growth spike/.test(query)) {
     const spikeAnswer = answerGrowthSpike(series);
     if (spikeAnswer) {
@@ -230,13 +304,14 @@ function buildDeterministicAnswer(_query: string, series: SeriesSummary[]) {
   return lines.join(' ');
 }
 
-const SYSTEM_PROMPT = `You are an analyst writing concise answers about payments data.
+const SYSTEM_PROMPT = `You are a senior analyst writing concise answers about payments data.
 
 Rules:
 - Answer the user's exact question directly.
 - Use the provided metrics and time periods.
 - Prefer a clear yes/no first when the question implies it.
 - Include specific numbers and dates.
+- If asked for highest/lowest month, explicitly name the month and value.
 - 2-4 sentences maximum.
 - Plain text only.`;
 
@@ -255,12 +330,16 @@ function buildSeriesAnalytics(series: SeriesSummary[]) {
       units: s.units,
       latest: latest ? { date: latest.date, value: latest.value } : null,
       previous: previous ? { date: previous.date, value: previous.value } : null,
+      first: pts[0] ? { date: pts[0].date, value: pts[0].value } : null,
       latestChangePct: latest && previous && previous.value !== 0
         ? ((latest.value - previous.value) / Math.abs(previous.value)) * 100
         : null,
       maxIncreasePct: maxIncrease?.pct ?? null,
       maxIncreaseDate: maxIncrease?.date ?? null,
+      highestPoint: pts.length ? pts.reduce((a, b) => (b.value > a.value ? b : a)) : null,
+      lowestPoint: pts.length ? pts.reduce((a, b) => (b.value < a.value ? b : a)) : null,
       recentChangesPct: changes.slice(-3).map((c) => c.pct),
+      recentPoints: pts.slice(-12),
     };
   });
 }
