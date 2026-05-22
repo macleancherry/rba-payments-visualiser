@@ -17,6 +17,9 @@ interface QueryResponse {
   explanation: string;
 }
 
+const QUERY_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const queryCache = new Map<string, { expiresAt: number; value: QueryResponse }>();
+
 type ErrorResponse = {
   error: string;
   code?: string;
@@ -45,67 +48,25 @@ function classifyAiError(err: unknown): { status: number; body: ErrorResponse } 
   };
 }
 
-const SYSTEM_PROMPT = `You are a helpful assistant for an Australian payments data explorer powered by Reserve Bank of Australia (RBA) data.
+const SYSTEM_PROMPT = `Extract filters from a payments-data query and return JSON only.
 
-The user will ask a natural language question about payments data. Your job is to extract filter parameters from their question and return a JSON object.
-
-Available categories and subcategories:
-- Cards > Credit and Charge
-- Cards > Debit
-- Cards > Prepaid
+Categories:
+- Cards > Credit and Charge | Debit | Prepaid
 - Cash and ATM > ATM Withdrawals
 - Cheques > Cheques
-- Account-to-Account > Direct Credit
-- Account-to-Account > Direct Debit
-- Account-to-Account > Direct Entry
-- Account-to-Account > NPP
-- Account-to-Account > PayTo
+- Account-to-Account > Direct Credit | Direct Debit | Direct Entry | NPP | PayTo
 - High Value > RTGS
 
-Available measure types:
-- value (dollar values, e.g. "$X million")
-- volume (transaction counts, number of transactions)
-- accounts (cards on issue, account counts)
-- other
+Measure types: value | volume | accounts | other
 
-The current date is May 2026.
+Use either timeRange OR dateFrom/dateTo:
+- timeRange: 2Y | 5Y | 10Y | ALL
+- dates: YYYY-MM
 
-For time filtering, use EITHER a preset timeRange OR specific dateFrom/dateTo — not both:
-- timeRange presets: 2Y (last 2 years), 5Y (last 5 years), 10Y (last 10 years), ALL (all history)
-- dateFrom / dateTo: specific date range in YYYY-MM format for queries referencing a specific month, year, or period
-  - "in December" → assume December of the most recent past year (2025): dateFrom="2025-12", dateTo="2025-12"
-  - "in December 2023" → dateFrom="2023-12", dateTo="2023-12"
-  - "in 2023" → dateFrom="2023-01", dateTo="2023-12"
-  - "2022 to 2024" → dateFrom="2022-01", dateTo="2024-12"
-  - "since 2020" → dateFrom="2020-01", dateTo=null
-  - "last 2 years" → timeRange="2Y", dateFrom=null, dateTo=null
+JSON schema:
+{"category":string|null,"subcategory":string|null,"measureType":string|null,"timeRange":string|null,"dateFrom":string|null,"dateTo":string|null,"keywords":string|null,"explanation":string}
 
-Return ONLY a valid JSON object with these fields (use null for any you cannot determine):
-{
-  "category": string or null,
-  "subcategory": string or null,
-  "measureType": string or null,
-  "timeRange": string or null,
-  "dateFrom": string or null,
-  "dateTo": string or null,
-  "keywords": string or null,
-  "explanation": string (brief human-readable summary of what you understood)
-}
-
-Keyword rules:
-- Use keywords only for a specific series phrase that is likely to appear in a title and is not already captured by category, subcategory, measure type, or date filters.
-- Do not put generic leftover words into keywords.
-- Do not include question words, stop words, or broad words like "payments", "transactions", "spending", "how many", "what is", "show me", "in", "for", "last".
-- If the extra wording is ambiguous or conversational, return keywords as null.
-- Prefer broader matching over over-filtering. When unsure, use null.
-
-Examples:
-- "credit card spending last 2 years" → {"category":"Cards","subcategory":"Credit and Charge","measureType":"value","timeRange":"2Y","dateFrom":null,"dateTo":null,"keywords":null,"explanation":"Credit and charge card transaction values over the last 2 years"}
-- "how many NPP payments" → {"category":"Account-to-Account","subcategory":"NPP","measureType":"volume","timeRange":null,"dateFrom":null,"dateTo":null,"keywords":null,"explanation":"NPP payment volumes"}
-- "credit card spending in December" → {"category":"Cards","subcategory":"Credit and Charge","measureType":"value","timeRange":null,"dateFrom":"2025-12","dateTo":"2025-12","keywords":null,"explanation":"Credit and charge card transaction values in December 2025"}
-- "debit card transactions in 2022" → {"category":"Cards","subcategory":"Debit","measureType":null,"timeRange":null,"dateFrom":"2022-01","dateTo":"2022-12","keywords":null,"explanation":"Debit card transactions in 2022"}
-- "contactless credit card spending" → {"category":"Cards","subcategory":"Credit and Charge","measureType":"value","timeRange":null,"dateFrom":null,"dateTo":null,"keywords":"contactless","explanation":"Contactless credit and charge card transaction values"}
-- "show me card spending please" → {"category":"Cards","subcategory":null,"measureType":"value","timeRange":null,"dateFrom":null,"dateTo":null,"keywords":null,"explanation":"Card transaction values"}`;
+keywords should only be a specific series phrase not already represented by category/subcategory/measure/date; otherwise null.`;
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   try {
@@ -120,12 +81,18 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return Response.json({ error: 'AI binding not available', code: 'AI_BINDING_MISSING' }, { status: 503 });
     }
 
+    const cacheKey = query.toLowerCase();
+    const cached = queryCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return Response.json(cached.value);
+    }
+
     const response = await context.env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: query },
       ],
-      max_tokens: 300,
+      max_tokens: 120,
     });
 
     const aiResponse = response as unknown;
@@ -152,6 +119,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     } else {
       return Response.json({ error: 'Unexpected AI response shape', code: 'AI_PARSE_ERROR', raw: JSON.stringify(aiResponse) }, { status: 502 });
     }
+
+    queryCache.set(cacheKey, {
+      value: parsed,
+      expiresAt: Date.now() + QUERY_CACHE_TTL_MS,
+    });
 
     return Response.json(parsed);
   } catch (err) {

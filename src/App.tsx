@@ -367,7 +367,7 @@ function App() {
           units: s.units,
           points: s.points
             .filter((p) => (!dateMin || p.date >= dateMin) && (!dateMax || p.date <= dateMax))
-            .slice(-24),
+            .slice(-12),
         }));
 
         if (seriesPayload.some((s) => s.points.length > 0)) {

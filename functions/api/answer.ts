@@ -13,6 +13,9 @@ interface AnswerRequest {
   series: SeriesSummary[];
 }
 
+const ANSWER_CACHE_TTL_MS = 30 * 60 * 1000;
+const answerCache = new Map<string, { expiresAt: number; value: string }>();
+
 type ErrorResponse = {
   error: string;
   code?: string;
@@ -64,9 +67,21 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return Response.json({ error: 'AI binding not available', code: 'AI_BINDING_MISSING' }, { status: 503 });
     }
 
+    const normalizedSeries = series.map((s) => ({
+      title: s.title,
+      units: s.units,
+      points: s.points.slice(-12),
+    }));
+
+    const cacheKey = JSON.stringify({ query: query.trim().toLowerCase(), series: normalizedSeries });
+    const cached = answerCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return Response.json({ answer: cached.value });
+    }
+
     // Build a compact data summary for the prompt
-    const dataSummary = series.map((s) => {
-      const pts = s.points.slice(-24); // last 24 data points
+    const dataSummary = normalizedSeries.map((s) => {
+      const pts = s.points;
       const rows = pts.map((p) => `${p.date}: ${p.value}`).join(', ');
       return `Series: ${s.title} (${s.units})\nData: ${rows}`;
     }).join('\n\n');
@@ -78,7 +93,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: userMessage },
       ],
-      max_tokens: 200,
+      max_tokens: 120,
     });
 
     const aiResponse = response as unknown;
@@ -87,6 +102,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       : aiResponse;
 
     const answer = typeof inner === 'string' ? inner.trim() : JSON.stringify(inner);
+
+    answerCache.set(cacheKey, {
+      value: answer,
+      expiresAt: Date.now() + ANSWER_CACHE_TTL_MS,
+    });
 
     return Response.json({ answer });
   } catch (e) {
