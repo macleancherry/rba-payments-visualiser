@@ -790,9 +790,121 @@ function App() {
               },
             }}
           />
-          <Typography variant="caption" sx={{ mt: 1, display: 'block', color: 'text.secondary' }}>
-            Try: "When did card payment growth spike the most?", "Has NPP overtaken direct entry in momentum?", or "Is PayTo acceleration sustained across recent quarters?"
-          </Typography>
+          <Box sx={{ mt: 1.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 500 }}>
+              Try these queries:
+            </Typography>
+            <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5 }}>
+              {[
+                'When did card payment growth spike the most?',
+                'Has NPP overtaken direct entry in momentum?',
+                'Is PayTo acceleration sustained across recent quarters?',
+              ].map((query) => (
+                <Chip
+                  key={query}
+                  label={query}
+                  onClick={() => {
+                    setNlQuery(query);
+                    setTimeout(() => {
+                      nlInputRef.current?.focus();
+                      // Simulate the query execution with a small delay
+                      setTimeout(() => {
+                        const q = query.trim();
+                        if (q) {
+                          setNlLoading(true);
+                          setNlError(null);
+                          setNlResult(null);
+                          setNlAnswer(null);
+                          fetch('/api/query', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ query: q }),
+                          })
+                            .then((res) => {
+                              if (!res.ok) throw new Error(`Request failed (${res.status})`);
+                              return res.json() as Promise<{
+                                category?: string; subcategory?: string; measureType?: string;
+                                timeRange?: string; dateFrom?: string; dateTo?: string;
+                                keywords?: string; explanation: string;
+                              }>;
+                            })
+                            .then((data) => {
+                              const newCategory = data.category ?? 'All';
+                              const newSubcategory = data.subcategory ?? 'All';
+                              const newMeasureType = (data.measureType ?? 'All') as 'All' | MeasureType;
+                              const requestedKeywords = data.keywords?.trim() ?? '';
+                              const newFrom = (data.dateFrom || data.dateTo) ? (data.dateFrom ?? null) : null;
+                              const newTo = (data.dateFrom || data.dateTo) ? (data.dateTo ?? null) : null;
+                              const matchesWithKeywords = getSeriesMatches(newCategory, newSubcategory, newMeasureType, requestedKeywords);
+                              const matchesWithoutKeywords = getSeriesMatches(newCategory, newSubcategory, newMeasureType, '');
+                              const effectiveKeywords = requestedKeywords && matchesWithKeywords.length > 0 ? requestedKeywords : '';
+
+                              if (data.category) setCategory(newCategory);
+                              if (data.subcategory) setSubcategory(newSubcategory);
+                              if (data.measureType) setMeasureType(newMeasureType);
+                              if (newFrom || newTo) {
+                                setCustomFrom(newFrom);
+                                setCustomTo(newTo);
+                              } else if (data.timeRange) {
+                                setCustomFrom(null);
+                                setCustomTo(null);
+                                setTimeRange(data.timeRange as RangeOption);
+                              }
+                              setSeriesSearch(effectiveKeywords);
+                              setNlResult({ explanation: data.explanation });
+
+                              if (dataset) {
+                                const answerCandidates = (effectiveKeywords ? matchesWithKeywords : matchesWithoutKeywords);
+                                const matchingSeries = answerCandidates
+                                  .filter((s) => !s.dimensions || Object.keys(s.dimensions).length === 0)
+                                  .slice(0, 3);
+
+                                const topSeries = matchingSeries.length ? matchingSeries
+                                  : matchesWithoutKeywords
+                                      .slice(0, 2);
+
+                                const dateMin = newFrom ? `${newFrom}-01` : null;
+                                const dateMax = newTo ? `${newTo}-31` : null;
+
+                                const seriesPayload = topSeries.map((s) => ({
+                                  title: s.title,
+                                  units: s.units,
+                                  points: s.points
+                                    .filter((p) => (!dateMin || p.date >= dateMin) && (!dateMax || p.date <= dateMax))
+                                    .slice(-24),
+                                }));
+
+                                if (seriesPayload.some((s) => s.points.length > 0)) {
+                                  setNlAnswerLoading(true);
+                                  fetch('/api/answer', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ query: q, series: seriesPayload }),
+                                  })
+                                    .then((r) => r.json() as Promise<{ answer?: string; error?: string }>)
+                                    .then((d) => setNlAnswer(d.answer ?? null))
+                                    .catch(() => setNlAnswer(null))
+                                    .finally(() => setNlAnswerLoading(false));
+                                }
+                              }
+                            })
+                            .catch((e) => {
+                              setNlError(e instanceof Error ? e.message : 'Unknown error');
+                            })
+                            .finally(() => {
+                              setNlLoading(false);
+                            });
+                        }
+                      }, 50);
+                    }, 0);
+                  }}
+                  variant="outlined"
+                  size="small"
+                  sx={{ cursor: 'pointer', '&:hover': { backgroundColor: 'action.hover' } }}
+                />
+              ))}
+            </Stack>
+          </Box>
           {nlResult && (
             <Typography variant="caption" sx={{ mt: 1, display: 'block', color: 'text.secondary' }}>
               ✓ {nlResult.explanation}
