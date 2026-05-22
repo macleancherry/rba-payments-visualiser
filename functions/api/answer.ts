@@ -26,7 +26,7 @@ function classifyAiError(err: unknown): { status: number; body: ErrorResponse } 
     return {
       status: 429,
       body: {
-        error: 'NLP capacity is temporarily unavailable because the daily AI quota has been reached. Please try again later.',
+        error: 'NLP capacity is temporarily unavailable because the daily AI quota has been reached. Please try again later, or use the filters below to find the data manually.',
         code: 'AI_QUOTA_EXCEEDED',
       },
     };

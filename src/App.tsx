@@ -123,7 +123,7 @@ function matchesSeriesSearch(series: PaymentSeries, search: string) {
 
 function getNlErrorMessage(status: number, serverError?: string) {
   if (status === 429) {
-    return serverError ?? 'NLP is temporarily unavailable because the daily AI quota has been reached. Please try again later.';
+    return serverError ?? 'NLP is temporarily unavailable because the daily AI quota has been reached. Please try again later, or use the filters below to find the data manually.';
   }
   if (status === 503) {
     return serverError ?? 'NLP service is currently unavailable. Please try again shortly.';
@@ -151,7 +151,7 @@ function App() {
   const [subcategory, setSubcategory] = useState('All');
   const [measureType, setMeasureType] = useState<'All' | MeasureType>('All');
   const [seriesSearch, setSeriesSearch] = useState('');
-  const [timeRange, setTimeRange] = useState<RangeOption>('5Y');
+  const [timeRange, setTimeRange] = useState<RangeOption>('ALL');
   const [selectedSeries, setSelectedSeries] = useState<PaymentSeries[]>([]);
 
   const [dimSegment, setDimSegment] = useState('All');
@@ -242,7 +242,7 @@ function App() {
     setSubcategory('All');
     setMeasureType('All');
     setSeriesSearch('');
-    setTimeRange('5Y');
+    setTimeRange('ALL');
     setCustomFrom(null);
     setCustomTo(null);
     setDimSegment('All');
