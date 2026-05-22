@@ -79,6 +79,16 @@ type DatasetPayload = {
 };
 
 const SERIES_COLORS = ['#0f4c81', '#11b5a4', '#ff7a59', '#0a2f5a', '#23a6d5', '#f4b400'];
+const DEFAULT_SELECTED_SERIES_TITLES = [
+  'Debit: Value of purchases',
+  'Credit and Charge: Value of purchases',
+  'Total number of NPP payments',
+  'Total number of direct entry payments',
+  'Number of PayTo transactions',
+  'Debit: Value of mobile wallet transactions',
+  'Total number of cash withdrawals by debit cards',
+  'Total number of cheques',
+];
 
 const RANGE_YEARS: Record<Exclude<RangeOption, 'ALL'>, number> = {
   '2Y': 2,
@@ -106,6 +116,34 @@ function formatValue(value: number, units: string) {
 
 function shortenLabel(label: string, max = 34) {
   return label.length <= max ? label : `${label.slice(0, max - 1)}…`;
+}
+
+const compactNumberFormatter = new Intl.NumberFormat('en-AU', {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+});
+
+function formatAxisTick(value: number | string) {
+  const numeric = Number(value);
+  if (Number.isNaN(numeric)) {
+    return String(value);
+  }
+
+  return compactNumberFormatter.format(numeric);
+}
+
+function formatValueAxisTick(value: number | string) {
+  const numeric = Number(value);
+  if (Number.isNaN(numeric)) {
+    return String(value);
+  }
+
+  const billions = numeric / 1000;
+  if (Math.abs(billions) >= 1) {
+    return `$${billions.toFixed(1).replace(/\.0$/, '')}B`;
+  }
+
+  return `$${numeric.toFixed(0)}M`;
 }
 
 function matchesSeriesSearch(series: PaymentSeries, search: string) {
@@ -463,10 +501,37 @@ function App() {
         return stillVisible;
       }
 
-      const preferred = filteredSeries.filter((item) => item.measureType === 'value').slice(0, 3);
-      return preferred.length ? preferred : filteredSeries.slice(0, 3);
+      const preferredDefault = DEFAULT_SELECTED_SERIES_TITLES
+        .map((title) => filteredSeries.find((series) => series.title === title))
+        .filter(Boolean) as PaymentSeries[];
+
+      if (preferredDefault.length >= 4) {
+        return preferredDefault;
+      }
+
+      return filteredSeries;
     });
   }, [filteredSeries]);
+
+  const hasValueSeries = useMemo(
+    () => selectedSeries.some((series) => series.measureType === 'value'),
+    [selectedSeries],
+  );
+
+  const hasNonValueSeries = useMemo(
+    () => selectedSeries.some((series) => series.measureType !== 'value'),
+    [selectedSeries],
+  );
+
+  const useDualMeasureAxes = hasValueSeries && hasNonValueSeries;
+
+  const getAxisId = (series: PaymentSeries) => {
+    if (!useDualMeasureAxes) {
+      return 'left';
+    }
+
+    return series.measureType === 'value' ? 'value' : 'count';
+  };
 
   const timelineRows = useMemo(() => {
     if (!selectedSeries.length) {
@@ -531,6 +596,19 @@ function App() {
   const unitsBySeriesId = useMemo(() => {
     return new Map(selectedSeries.map((series) => [series.id, series.units]));
   }, [selectedSeries]);
+
+  const unitsBySeriesTitle = useMemo(() => {
+    return new Map(selectedSeries.map((series) => [series.title, series.units]));
+  }, [selectedSeries]);
+
+  const resolveTooltipUnits = (name: string, item?: { dataKey?: string }) => {
+    const dataKey = String(item?.dataKey ?? '');
+    if (dataKey && unitsBySeriesId.has(dataKey)) {
+      return unitsBySeriesId.get(dataKey) ?? 'Number';
+    }
+
+    return unitsBySeriesTitle.get(name) ?? 'Number';
+  };
 
   const quickStats = useMemo(() => {
     if (!dataset) {
@@ -633,10 +711,17 @@ function App() {
                   <LineChart data={timelineRows}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="label" minTickGap={40} />
-                    <YAxis />
+                    {useDualMeasureAxes ? (
+                      <>
+                        <YAxis yAxisId="value" width={76} tickFormatter={formatValueAxisTick} />
+                        <YAxis yAxisId="count" orientation="right" width={76} tickFormatter={formatAxisTick} />
+                      </>
+                    ) : (
+                      <YAxis yAxisId="left" width={76} tickFormatter={hasValueSeries ? formatValueAxisTick : formatAxisTick} />
+                    )}
                     <Tooltip
-                      formatter={(value, name) => {
-                        const units = unitsBySeriesId.get(String(name)) ?? 'Number';
+                      formatter={(value, name, item) => {
+                        const units = resolveTooltipUnits(String(name), item as { dataKey?: string });
                         return formatValue(Number(value), units);
                       }}
                     />
@@ -645,6 +730,7 @@ function App() {
                       <Line
                         key={series.id}
                         type="monotone"
+                        yAxisId={getAxisId(series)}
                         dataKey={series.id}
                         name={series.title}
                         stroke={SERIES_COLORS[idx % SERIES_COLORS.length]}
@@ -682,10 +768,17 @@ function App() {
                       <AreaChart data={timelineRows}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="label" minTickGap={40} />
-                        <YAxis />
+                        {useDualMeasureAxes ? (
+                          <>
+                            <YAxis yAxisId="value" width={76} tickFormatter={formatValueAxisTick} />
+                            <YAxis yAxisId="count" orientation="right" width={76} tickFormatter={formatAxisTick} />
+                          </>
+                        ) : (
+                          <YAxis yAxisId="left" width={76} tickFormatter={hasValueSeries ? formatValueAxisTick : formatAxisTick} />
+                        )}
                         <Tooltip
-                          formatter={(value, name) => {
-                            const units = unitsBySeriesId.get(String(name)) ?? 'Number';
+                          formatter={(value, name, item) => {
+                            const units = resolveTooltipUnits(String(name), item as { dataKey?: string });
                             return formatValue(Number(value), units);
                           }}
                         />
@@ -693,6 +786,7 @@ function App() {
                           <Area
                             key={series.id}
                             type="monotone"
+                            yAxisId={getAxisId(series)}
                             dataKey={series.id}
                             name={series.title}
                             stroke={SERIES_COLORS[idx % SERIES_COLORS.length]}
@@ -1033,10 +1127,17 @@ function App() {
                   <LineChart data={timelineRows}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="label" minTickGap={40} />
-                    <YAxis />
+                    {useDualMeasureAxes ? (
+                      <>
+                        <YAxis yAxisId="value" width={76} tickFormatter={formatValueAxisTick} />
+                        <YAxis yAxisId="count" orientation="right" width={76} tickFormatter={formatAxisTick} />
+                      </>
+                    ) : (
+                      <YAxis yAxisId="left" width={76} tickFormatter={hasValueSeries ? formatValueAxisTick : formatAxisTick} />
+                    )}
                     <Tooltip
-                      formatter={(value, name) => {
-                        const units = unitsBySeriesId.get(String(name)) ?? 'Number';
+                      formatter={(value, name, item) => {
+                        const units = resolveTooltipUnits(String(name), item as { dataKey?: string });
                         return formatValue(Number(value), units);
                       }}
                     />
@@ -1045,6 +1146,7 @@ function App() {
                       <Line
                         key={series.id}
                         type="monotone"
+                        yAxisId={getAxisId(series)}
                         dataKey={series.id}
                         name={series.title}
                         stroke={SERIES_COLORS[idx % SERIES_COLORS.length]}
@@ -1085,10 +1187,17 @@ function App() {
                   <AreaChart data={timelineRows}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="label" minTickGap={40} />
-                    <YAxis />
+                    {useDualMeasureAxes ? (
+                      <>
+                        <YAxis yAxisId="value" width={76} tickFormatter={formatValueAxisTick} />
+                        <YAxis yAxisId="count" orientation="right" width={76} tickFormatter={formatAxisTick} />
+                      </>
+                    ) : (
+                      <YAxis yAxisId="left" width={76} tickFormatter={hasValueSeries ? formatValueAxisTick : formatAxisTick} />
+                    )}
                     <Tooltip
-                      formatter={(value, name) => {
-                        const units = unitsBySeriesId.get(String(name)) ?? 'Number';
+                      formatter={(value, name, item) => {
+                        const units = resolveTooltipUnits(String(name), item as { dataKey?: string });
                         return formatValue(Number(value), units);
                       }}
                     />
@@ -1096,6 +1205,7 @@ function App() {
                       <Area
                         key={series.id}
                         type="monotone"
+                        yAxisId={getAxisId(series)}
                         dataKey={series.id}
                         name={series.title}
                         stroke={SERIES_COLORS[idx % SERIES_COLORS.length]}
