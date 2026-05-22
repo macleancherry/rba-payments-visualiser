@@ -1,5 +1,5 @@
 interface Env {
-  AI: Ai;
+  AI?: Ai;
 }
 
 interface SeriesSummary {
@@ -82,43 +82,47 @@ async function setEdgeCache(cacheKey: string, answer: string) {
   await caches.default.put(buildEdgeRequest(cacheKey), response);
 }
 
-type ErrorResponse = {
-  error: string;
-  code?: string;
-};
-
-function classifyAiError(err: unknown): { status: number; body: ErrorResponse } {
-  const message = err instanceof Error ? err.message : String(err);
-  const lowered = message.toLowerCase();
-
-  if (message.includes('4006') || lowered.includes('daily free allocation')) {
-    return {
-      status: 429,
-      body: {
-        error: 'NLP capacity is temporarily unavailable because the daily AI quota has been reached. Please try again later, or use the filters below to find the data manually.',
-        code: 'AI_QUOTA_EXCEEDED',
-      },
-    };
+function formatPeriod(date: string) {
+  const [year, month] = date.split('-');
+  const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const idx = Number(month) - 1;
+  if (!Number.isFinite(idx) || idx < 0 || idx > 11) {
+    return date;
   }
-
-  return {
-    status: 502,
-    body: {
-      error: message,
-      code: 'AI_UPSTREAM_ERROR',
-    },
-  };
+  return `${names[idx]} ${year}`;
 }
 
-const SYSTEM_PROMPT = `You are a concise analyst for Australian payments data from the Reserve Bank of Australia (RBA).
+function formatSeriesValue(value: number, units: string) {
+  const lower = units.toLowerCase();
+  const isCurrency = lower.includes('$');
+  const compact = new Intl.NumberFormat('en-AU', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+  return `${isCurrency ? '$' : ''}${compact}`;
+}
 
-The user asked a question and you have been provided with the relevant data series. Write a 2-4 sentence natural language answer that:
-- Directly addresses the user's question
-- References specific values and trends from the data (e.g. latest value, year-on-year change, notable trends)
-- Mentions the time period and units
-- Does not mention "RBA" or "the data shows" — speak naturally as if you know this information
+function buildDeterministicAnswer(_query: string, series: SeriesSummary[]) {
+  const lines = series
+    .slice(0, 2)
+    .map((s) => {
+      const pts = s.points.filter((p) => Number.isFinite(p.value));
+      const latest = pts[pts.length - 1];
+      const previous = pts[pts.length - 2] ?? null;
 
-Keep it brief and informative. Do not use markdown formatting or bullet points — plain prose only.`;
+      if (!latest) {
+        return `${s.title} has no recent data points in the selected range.`;
+      }
+
+      const latestValue = formatSeriesValue(latest.value, s.units);
+      if (!previous || previous.value === 0) {
+        return `${s.title} is ${latestValue} in ${formatPeriod(latest.date)}.`;
+      }
+
+      const deltaPct = ((latest.value - previous.value) / Math.abs(previous.value)) * 100;
+      const direction = deltaPct >= 0 ? 'up' : 'down';
+      return `${s.title} is ${latestValue} in ${formatPeriod(latest.date)}, ${direction} ${Math.abs(deltaPct).toFixed(1)}% from ${formatPeriod(previous.date)}.`;
+    });
+
+  return lines.join(' ');
+}
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   try {
@@ -127,10 +131,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     if (!query || !series?.length) {
       return Response.json({ error: 'query and series are required' }, { status: 400 });
-    }
-
-    if (!context.env.AI) {
-      return Response.json({ error: 'AI binding not available', code: 'AI_BINDING_MISSING' }, { status: 503 });
     }
 
     const normalizedSeries = series.map((s) => ({
@@ -154,29 +154,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return Response.json({ answer: edgeCached });
     }
 
-    // Build a compact data summary for the prompt
-    const dataSummary = normalizedSeries.map((s) => {
-      const pts = s.points;
-      const rows = pts.map((p) => `${p.date}: ${p.value}`).join(', ');
-      return `Series: ${s.title} (${s.units})\nData: ${rows}`;
-    }).join('\n\n');
-
-    const userMessage = `User question: "${query}"\n\nAvailable data:\n${dataSummary}`;
-
-    const response = await context.env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: userMessage },
-      ],
-      max_tokens: 120,
-    });
-
-    const aiResponse = response as unknown;
-    const inner = aiResponse && typeof aiResponse === 'object'
-      ? (aiResponse as Record<string, unknown>).response
-      : aiResponse;
-
-    const answer = typeof inner === 'string' ? inner.trim() : JSON.stringify(inner);
+    const answer = buildDeterministicAnswer(query, normalizedSeries);
 
     answerCache.set(cacheKey, {
       value: answer,
@@ -187,7 +165,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     return Response.json({ answer });
   } catch (e) {
-    const { status, body } = classifyAiError(e);
-    return Response.json(body, { status });
+    const message = e instanceof Error ? e.message : 'Unknown error';
+    return Response.json({ error: message }, { status: 500 });
   }
 };
