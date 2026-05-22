@@ -4,6 +4,7 @@ interface Env {
 
 interface QueryRequest {
   query: string;
+  datasetVersion?: string;
 }
 
 interface QueryResponse {
@@ -17,8 +18,50 @@ interface QueryResponse {
   explanation: string;
 }
 
-const QUERY_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const QUERY_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+const QUERY_CACHE_TTL_SECONDS = 90 * 24 * 60 * 60;
 const queryCache = new Map<string, { expiresAt: number; value: QueryResponse }>();
+
+function normalizeQuery(query: string) {
+  return query.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function normalizeDatasetVersion(version?: string) {
+  const trimmed = String(version ?? '').trim();
+  return trimmed || 'unknown';
+}
+
+function buildCacheKey(query: string, datasetVersion?: string) {
+  return `query:v1:${normalizeDatasetVersion(datasetVersion)}:${normalizeQuery(query)}`;
+}
+
+function buildEdgeRequest(cacheKey: string) {
+  return new Request(`https://nlp-cache.local/query/${encodeURIComponent(cacheKey)}`);
+}
+
+async function getFromEdgeCache(cacheKey: string) {
+  const cached = await caches.default.match(buildEdgeRequest(cacheKey));
+  if (!cached) {
+    return null;
+  }
+
+  try {
+    return await cached.json<QueryResponse>();
+  } catch {
+    return null;
+  }
+}
+
+async function setEdgeCache(cacheKey: string, value: QueryResponse) {
+  const response = new Response(JSON.stringify(value), {
+    headers: {
+      'content-type': 'application/json',
+      'cache-control': `public, max-age=${QUERY_CACHE_TTL_SECONDS}`,
+    },
+  });
+
+  await caches.default.put(buildEdgeRequest(cacheKey), response);
+}
 
 type ErrorResponse = {
   error: string;
@@ -81,10 +124,19 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return Response.json({ error: 'AI binding not available', code: 'AI_BINDING_MISSING' }, { status: 503 });
     }
 
-    const cacheKey = query.toLowerCase();
+    const cacheKey = buildCacheKey(query, body?.datasetVersion);
     const cached = queryCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       return Response.json(cached.value);
+    }
+
+    const edgeCached = await getFromEdgeCache(cacheKey);
+    if (edgeCached) {
+      queryCache.set(cacheKey, {
+        value: edgeCached,
+        expiresAt: Date.now() + QUERY_CACHE_TTL_MS,
+      });
+      return Response.json(edgeCached);
     }
 
     const response = await context.env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
@@ -124,6 +176,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       value: parsed,
       expiresAt: Date.now() + QUERY_CACHE_TTL_MS,
     });
+
+    await setEdgeCache(cacheKey, parsed);
 
     return Response.json(parsed);
   } catch (err) {

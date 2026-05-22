@@ -11,10 +11,76 @@ interface SeriesSummary {
 interface AnswerRequest {
   query: string;
   series: SeriesSummary[];
+  datasetVersion?: string;
 }
 
-const ANSWER_CACHE_TTL_MS = 30 * 60 * 1000;
+const ANSWER_CACHE_TTL_MS = 2 * 60 * 60 * 1000;
+const ANSWER_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60;
 const answerCache = new Map<string, { expiresAt: number; value: string }>();
+
+function normalizeQuery(query: string) {
+  return query.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function normalizeDatasetVersion(version?: string) {
+  const trimmed = String(version ?? '').trim();
+  return trimmed || 'unknown';
+}
+
+function hashString(text: string) {
+  let hash = 5381;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = ((hash << 5) + hash) ^ text.charCodeAt(i);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function buildSeriesSignature(series: SeriesSummary[]) {
+  return series
+    .map((s) => {
+      const pointsSig = s.points
+        .slice(-12)
+        .map((p) => `${p.date}:${p.value}`)
+        .join('|');
+      return `${s.title}~${s.units}~${pointsSig}`;
+    })
+    .sort()
+    .join('||');
+}
+
+function buildCacheKey(query: string, datasetVersion: string | undefined, series: SeriesSummary[]) {
+  const payloadSig = `${normalizeQuery(query)}::${buildSeriesSignature(series)}`;
+  return `answer:v1:${normalizeDatasetVersion(datasetVersion)}:${hashString(payloadSig)}`;
+}
+
+function buildEdgeRequest(cacheKey: string) {
+  return new Request(`https://nlp-cache.local/answer/${encodeURIComponent(cacheKey)}`);
+}
+
+async function getFromEdgeCache(cacheKey: string) {
+  const cached = await caches.default.match(buildEdgeRequest(cacheKey));
+  if (!cached) {
+    return null;
+  }
+
+  try {
+    const parsed = await cached.json<{ answer?: string }>();
+    return parsed.answer ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function setEdgeCache(cacheKey: string, answer: string) {
+  const response = new Response(JSON.stringify({ answer }), {
+    headers: {
+      'content-type': 'application/json',
+      'cache-control': `public, max-age=${ANSWER_CACHE_TTL_SECONDS}`,
+    },
+  });
+
+  await caches.default.put(buildEdgeRequest(cacheKey), response);
+}
 
 type ErrorResponse = {
   error: string;
@@ -73,10 +139,19 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       points: s.points.slice(-12),
     }));
 
-    const cacheKey = JSON.stringify({ query: query.trim().toLowerCase(), series: normalizedSeries });
+    const cacheKey = buildCacheKey(query, body?.datasetVersion, normalizedSeries);
     const cached = answerCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       return Response.json({ answer: cached.value });
+    }
+
+    const edgeCached = await getFromEdgeCache(cacheKey);
+    if (edgeCached) {
+      answerCache.set(cacheKey, {
+        value: edgeCached,
+        expiresAt: Date.now() + ANSWER_CACHE_TTL_MS,
+      });
+      return Response.json({ answer: edgeCached });
     }
 
     // Build a compact data summary for the prompt
@@ -107,6 +182,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       value: answer,
       expiresAt: Date.now() + ANSWER_CACHE_TTL_MS,
     });
+
+    await setEdgeCache(cacheKey, answer);
 
     return Response.json({ answer });
   } catch (e) {

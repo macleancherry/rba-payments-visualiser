@@ -241,6 +241,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: insightQuery,
+          datasetVersion: dataset?.generatedAt,
           series: series
             .slice(0, 2)
             .map((s) => ({
@@ -315,7 +316,7 @@ function App() {
       const res = await fetch('/api/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: q }),
+        body: JSON.stringify({ query: q, datasetVersion: dataset?.generatedAt }),
       });
       if (!res.ok) throw new Error(await parseApiError(res));
       const data = await res.json() as {
@@ -375,7 +376,7 @@ function App() {
           fetch('/api/answer', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: q, series: seriesPayload }),
+            body: JSON.stringify({ query: q, datasetVersion: dataset?.generatedAt, series: seriesPayload }),
           })
             .then(async (r) => {
               if (!r.ok) {
