@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  Autocomplete,
   Box,
   Button,
   Card,
   CardContent,
+  Checkbox,
   Chip,
   CircularProgress,
   FormControl,
+  FormControlLabel,
+  FormGroup,
   Grid,
   IconButton,
   InputAdornment,
@@ -16,6 +18,7 @@ import {
   MenuItem,
   Select,
   Stack,
+  Switch,
   TextField,
   Typography,
 } from '@mui/material';
@@ -78,7 +81,30 @@ type DatasetPayload = {
   series: PaymentSeries[];
 };
 
+type NlQueryResponse = {
+  category?: string;
+  subcategory?: string;
+  measureType?: string;
+  timeRange?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  keywords?: string;
+  explanation: string;
+};
+
 const SERIES_COLORS = ['#0f4c81', '#11b5a4', '#ff7a59', '#0a2f5a', '#23a6d5', '#f4b400'];
+const MAX_SERIES_CHECKBOX_ROWS = 120;
+const MAX_PLOTTED_SERIES = 8;
+const DEFAULT_SELECTED_SERIES_TITLES = [
+  'Debit: Value of purchases',
+  'Credit and Charge: Value of purchases',
+  'Total number of NPP payments',
+  'Total number of direct entry payments',
+  'Number of PayTo transactions',
+  'Debit: Value of mobile wallet transactions',
+  'Total number of cash withdrawals by debit cards',
+  'Total number of cheques',
+];
 
 const RANGE_YEARS: Record<Exclude<RangeOption, 'ALL'>, number> = {
   '2Y': 2,
@@ -108,6 +134,34 @@ function shortenLabel(label: string, max = 34) {
   return label.length <= max ? label : `${label.slice(0, max - 1)}…`;
 }
 
+const compactNumberFormatter = new Intl.NumberFormat('en-AU', {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+});
+
+function formatAxisTick(value: number | string) {
+  const numeric = Number(value);
+  if (Number.isNaN(numeric)) {
+    return String(value);
+  }
+
+  return compactNumberFormatter.format(numeric);
+}
+
+function formatValueAxisTick(value: number | string) {
+  const numeric = Number(value);
+  if (Number.isNaN(numeric)) {
+    return String(value);
+  }
+
+  const billions = numeric / 1000;
+  if (Math.abs(billions) >= 1) {
+    return `$${billions.toFixed(1).replace(/\.0$/, '')}B`;
+  }
+
+  return `$${numeric.toFixed(0)}M`;
+}
+
 function matchesSeriesSearch(series: PaymentSeries, search: string) {
   if (!search) {
     return true;
@@ -129,7 +183,7 @@ function App() {
   const [subcategory, setSubcategory] = useState('All');
   const [measureType, setMeasureType] = useState<'All' | MeasureType>('All');
   const [seriesSearch, setSeriesSearch] = useState('');
-  const [timeRange, setTimeRange] = useState<RangeOption>('5Y');
+  const [timeRange, setTimeRange] = useState<RangeOption>('ALL');
   const [selectedSeries, setSelectedSeries] = useState<PaymentSeries[]>([]);
 
   const [dimSegment, setDimSegment] = useState('All');
@@ -150,6 +204,7 @@ function App() {
   const [nlAnswer, setNlAnswer] = useState<string | null>(null);
   const [nlAnswerLoading, setNlAnswerLoading] = useState(false);
   const [isChartFullscreen, setIsChartFullscreen] = useState(false);
+  const [showAllPlotted, setShowAllPlotted] = useState(false);
 
   const [trendInsight, setTrendInsight] = useState<string | null>(null);
   const [trendInsightLoading, setTrendInsightLoading] = useState(false);
@@ -220,7 +275,7 @@ function App() {
     setSubcategory('All');
     setMeasureType('All');
     setSeriesSearch('');
-    setTimeRange('5Y');
+    setTimeRange('ALL');
     setCustomFrom(null);
     setCustomTo(null);
     setDimSegment('All');
@@ -234,93 +289,111 @@ function App() {
     setNlResult(null);
     setNlError(null);
     setNlAnswer(null);
+    setShowAllPlotted(false);
     setSelectedSeries([]);
   };
 
-  const handleNlQuery = async () => {
-    const q = nlQuery.trim();
-    if (!q) return;
+  const applyNlQueryResult = (q: string, data: NlQueryResponse) => {
+    const newCategory = data.category ?? 'All';
+    const newSubcategory = data.subcategory ?? 'All';
+    const newMeasureType = (data.measureType ?? 'All') as 'All' | MeasureType;
+    const requestedKeywords = data.keywords?.trim() ?? '';
+    const newFrom = (data.dateFrom || data.dateTo) ? (data.dateFrom ?? null) : null;
+    const newTo = (data.dateFrom || data.dateTo) ? (data.dateTo ?? null) : null;
+    const nextTimeRange = (data.timeRange ?? 'ALL') as RangeOption;
+    const matchesWithKeywords = getSeriesMatches(newCategory, newSubcategory, newMeasureType, requestedKeywords);
+    const matchesWithoutKeywords = getSeriesMatches(newCategory, newSubcategory, newMeasureType, '');
+    const effectiveKeywords = requestedKeywords && matchesWithKeywords.length > 0 ? requestedKeywords : '';
+
+    setCategory(newCategory);
+    setSubcategory(newSubcategory);
+    setMeasureType(newMeasureType);
+    setDimSegment('All');
+    setDimCardType('All');
+    setDimPrepaidType('All');
+    setDimLocation('All');
+    setDimAcquirer('All');
+    setDimMethod('All');
+    setDimInstrument('All');
+    if (newFrom || newTo) {
+      setCustomFrom(newFrom);
+      setCustomTo(newTo);
+    } else {
+      setCustomFrom(null);
+      setCustomTo(null);
+      setTimeRange(nextTimeRange);
+    }
+    setSeriesSearch(effectiveKeywords);
+    setNlResult({ explanation: data.explanation });
+    setShowAllPlotted(false);
+    setSelectedSeries([]);
+
+    if (!dataset) {
+      return;
+    }
+
+    const answerCandidates = (effectiveKeywords ? matchesWithKeywords : matchesWithoutKeywords);
+    const matchingSeries = answerCandidates
+      .filter((s) => !s.dimensions || Object.keys(s.dimensions).length === 0)
+      .slice(0, 3);
+
+    const topSeries = matchingSeries.length ? matchingSeries : matchesWithoutKeywords.slice(0, 2);
+
+    const dateMin = newFrom ? `${newFrom}-01` : null;
+    const dateMax = newTo ? `${newTo}-31` : null;
+
+    const seriesPayload = topSeries.map((s) => ({
+      title: s.title,
+      units: s.units,
+      points: s.points
+        .filter((p) => (!dateMin || p.date >= dateMin) && (!dateMax || p.date <= dateMax))
+        .slice(-24),
+    }));
+
+    if (!seriesPayload.some((s) => s.points.length > 0)) {
+      return;
+    }
+
+    setNlAnswerLoading(true);
+    fetch('/api/answer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: q, series: seriesPayload }),
+    })
+      .then((r) => r.json() as Promise<{ answer?: string; error?: string }>)
+      .then((d) => setNlAnswer(d.answer ?? null))
+      .catch(() => setNlAnswer(null))
+      .finally(() => setNlAnswerLoading(false));
+  };
+
+  const runNlQuery = async (q: string) => {
+    const trimmedQuery = q.trim();
+    if (!trimmedQuery) return;
+
     setNlLoading(true);
     setNlError(null);
     setNlResult(null);
     setNlAnswer(null);
+
     try {
       const res = await fetch('/api/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: q }),
+        body: JSON.stringify({ query: trimmedQuery }),
       });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
-      const data = await res.json() as {
-        category?: string; subcategory?: string; measureType?: string;
-        timeRange?: string; dateFrom?: string; dateTo?: string;
-        keywords?: string; explanation: string;
-      };
 
-      const newCategory = data.category ?? 'All';
-      const newSubcategory = data.subcategory ?? 'All';
-      const newMeasureType = (data.measureType ?? 'All') as 'All' | MeasureType;
-      const requestedKeywords = data.keywords?.trim() ?? '';
-      const newFrom = (data.dateFrom || data.dateTo) ? (data.dateFrom ?? null) : null;
-      const newTo = (data.dateFrom || data.dateTo) ? (data.dateTo ?? null) : null;
-      const matchesWithKeywords = getSeriesMatches(newCategory, newSubcategory, newMeasureType, requestedKeywords);
-      const matchesWithoutKeywords = getSeriesMatches(newCategory, newSubcategory, newMeasureType, '');
-      const effectiveKeywords = requestedKeywords && matchesWithKeywords.length > 0 ? requestedKeywords : '';
-
-      if (data.category) setCategory(newCategory);
-      if (data.subcategory) setSubcategory(newSubcategory);
-      if (data.measureType) setMeasureType(newMeasureType);
-      if (newFrom || newTo) {
-        setCustomFrom(newFrom);
-        setCustomTo(newTo);
-      } else if (data.timeRange) {
-        setCustomFrom(null);
-        setCustomTo(null);
-        setTimeRange(data.timeRange as RangeOption);
-      }
-      setSeriesSearch(effectiveKeywords);
-      setNlResult({ explanation: data.explanation });
-
-      // Compute relevant series for the answer using the new filter values
-      if (dataset) {
-        const answerCandidates = (effectiveKeywords ? matchesWithKeywords : matchesWithoutKeywords);
-        const matchingSeries = answerCandidates
-          .filter((s) => !s.dimensions || Object.keys(s.dimensions).length === 0) // prefer aggregates
-          .slice(0, 3);
-
-        const topSeries = matchingSeries.length ? matchingSeries
-          : matchesWithoutKeywords
-              .slice(0, 2);
-
-        const dateMin = newFrom ? `${newFrom}-01` : null;
-        const dateMax = newTo ? `${newTo}-31` : null;
-
-        const seriesPayload = topSeries.map((s) => ({
-          title: s.title,
-          units: s.units,
-          points: s.points
-            .filter((p) => (!dateMin || p.date >= dateMin) && (!dateMax || p.date <= dateMax))
-            .slice(-24),
-        }));
-
-        if (seriesPayload.some((s) => s.points.length > 0)) {
-          setNlAnswerLoading(true);
-          fetch('/api/answer', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: q, series: seriesPayload }),
-          })
-            .then((r) => r.json() as Promise<{ answer?: string; error?: string }>)
-            .then((d) => setNlAnswer(d.answer ?? null))
-            .catch(() => setNlAnswer(null))
-            .finally(() => setNlAnswerLoading(false));
-        }
-      }
+      const data = await res.json() as NlQueryResponse;
+      applyNlQueryResult(trimmedQuery, data);
     } catch (e) {
       setNlError(e instanceof Error ? e.message : 'Unknown error');
     } finally {
       setNlLoading(false);
     }
+  };
+
+  const handleNlQuery = async () => {
+    await runNlQuery(nlQuery);
   };
 
   useEffect(() => {
@@ -422,6 +495,43 @@ function App() {
       .filter((item) => dimFilter(item, 'instrument', dimInstrument));
   }, [baseSeries, dimSegment, dimCardType, dimPrepaidType, dimLocation, dimAcquirer, dimMethod, dimInstrument]);
 
+  const selectedSeriesIdSet = useMemo(
+    () => new Set(selectedSeries.map((series) => series.id)),
+    [selectedSeries],
+  );
+
+  const plottedSeries = useMemo(() => {
+    if (showAllPlotted || selectedSeries.length <= MAX_PLOTTED_SERIES) {
+      return selectedSeries;
+    }
+
+    const latestValue = (series: PaymentSeries) => series.points[series.points.length - 1]?.value ?? Number.NEGATIVE_INFINITY;
+
+    return [...selectedSeries]
+      .sort((a, b) => Math.abs(latestValue(b)) - Math.abs(latestValue(a)))
+      .slice(0, MAX_PLOTTED_SERIES);
+  }, [selectedSeries, showAllPlotted]);
+
+  const hasValueSeries = useMemo(
+    () => plottedSeries.some((series) => series.measureType === 'value'),
+    [plottedSeries],
+  );
+
+  const hasNonValueSeries = useMemo(
+    () => plottedSeries.some((series) => series.measureType !== 'value'),
+    [plottedSeries],
+  );
+
+  const useDualMeasureAxes = hasValueSeries && hasNonValueSeries;
+
+  const getAxisId = (series: PaymentSeries) => {
+    if (!useDualMeasureAxes) {
+      return 'left';
+    }
+
+    return series.measureType === 'value' ? 'value' : 'count';
+  };
+
   useEffect(() => {
     if (!filteredSeries.length) {
       setSelectedSeries([]);
@@ -436,18 +546,25 @@ function App() {
         return stillVisible;
       }
 
-      const preferred = filteredSeries.filter((item) => item.measureType === 'value').slice(0, 3);
-      return preferred.length ? preferred : filteredSeries.slice(0, 3);
+      const preferredDefault = DEFAULT_SELECTED_SERIES_TITLES
+        .map((title) => filteredSeries.find((series) => series.title === title))
+        .filter(Boolean) as PaymentSeries[];
+
+      if (preferredDefault.length >= 4) {
+        return preferredDefault;
+      }
+
+      return filteredSeries;
     });
   }, [filteredSeries]);
 
   const timelineRows = useMemo(() => {
-    if (!selectedSeries.length) {
+    if (!plottedSeries.length) {
       return [] as Array<Record<string, number | string | null>>;
     }
 
     const allDates = new Set<string>();
-    selectedSeries.forEach((series) => {
+    plottedSeries.forEach((series) => {
       series.points.forEach((point) => allDates.add(point.date));
     });
 
@@ -469,28 +586,28 @@ function App() {
           label: format(parseISO(date), 'MMM yyyy'),
         };
 
-        selectedSeries.forEach((series) => {
+        plottedSeries.forEach((series) => {
           const match = series.points.find((point) => point.date === date);
           row[series.id] = match?.value ?? null;
         });
 
         return row;
       });
-  }, [selectedSeries, timeRange, customFrom, customTo]);
+  }, [plottedSeries, timeRange, customFrom, customTo]);
 
   useEffect(() => {
-    if (selectedSeries.length > 0 && timelineRows.length > 0) {
+    if (plottedSeries.length > 0 && timelineRows.length > 0) {
       if (!nlAnswerLoading) {
-        generateChartInsights(selectedSeries, timelineRows);
+        generateChartInsights(plottedSeries, timelineRows);
       }
     } else {
       setTrendInsight(null);
       setVolumeInsight(null);
     }
-  }, [selectedSeries, timelineRows, nlAnswerLoading]);
+  }, [plottedSeries, timelineRows, nlAnswerLoading]);
 
   const latestBySeries = useMemo(() => {
-    return selectedSeries
+    return plottedSeries
       .map((series) => ({
         label: shortenLabel(series.title),
         title: series.title,
@@ -499,11 +616,24 @@ function App() {
       }))
       .filter((item) => item.value !== undefined)
       .slice(0, 10);
-  }, [selectedSeries]);
+  }, [plottedSeries]);
 
   const unitsBySeriesId = useMemo(() => {
-    return new Map(selectedSeries.map((series) => [series.id, series.units]));
-  }, [selectedSeries]);
+    return new Map(plottedSeries.map((series) => [series.id, series.units]));
+  }, [plottedSeries]);
+
+  const unitsBySeriesTitle = useMemo(() => {
+    return new Map(plottedSeries.map((series) => [series.title, series.units]));
+  }, [plottedSeries]);
+
+  const resolveTooltipUnits = (name: string, item?: { dataKey?: string }) => {
+    const dataKey = String(item?.dataKey ?? '');
+    if (dataKey && unitsBySeriesId.has(dataKey)) {
+      return unitsBySeriesId.get(dataKey) ?? 'Number';
+    }
+
+    return unitsBySeriesTitle.get(name) ?? 'Number';
+  };
 
   const quickStats = useMemo(() => {
     if (!dataset) {
@@ -606,18 +736,26 @@ function App() {
                   <LineChart data={timelineRows}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="label" minTickGap={40} />
-                    <YAxis />
+                    {useDualMeasureAxes ? (
+                      <>
+                        <YAxis yAxisId="value" width={76} tickFormatter={formatValueAxisTick} />
+                        <YAxis yAxisId="count" orientation="right" width={76} tickFormatter={formatAxisTick} />
+                      </>
+                    ) : (
+                      <YAxis yAxisId="left" width={76} tickFormatter={hasValueSeries ? formatValueAxisTick : formatAxisTick} />
+                    )}
                     <Tooltip
-                      formatter={(value, name) => {
-                        const units = unitsBySeriesId.get(String(name)) ?? 'Number';
+                      formatter={(value, name, item) => {
+                        const units = resolveTooltipUnits(String(name), item as { dataKey?: string });
                         return formatValue(Number(value), units);
                       }}
                     />
                     <Legend />
-                    {selectedSeries.map((series, idx) => (
+                    {plottedSeries.map((series, idx) => (
                       <Line
                         key={series.id}
                         type="monotone"
+                        yAxisId={getAxisId(series)}
                         dataKey={series.id}
                         name={series.title}
                         stroke={SERIES_COLORS[idx % SERIES_COLORS.length]}
@@ -655,17 +793,25 @@ function App() {
                       <AreaChart data={timelineRows}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="label" minTickGap={40} />
-                        <YAxis />
+                        {useDualMeasureAxes ? (
+                          <>
+                            <YAxis yAxisId="value" width={76} tickFormatter={formatValueAxisTick} />
+                            <YAxis yAxisId="count" orientation="right" width={76} tickFormatter={formatAxisTick} />
+                          </>
+                        ) : (
+                          <YAxis yAxisId="left" width={76} tickFormatter={hasValueSeries ? formatValueAxisTick : formatAxisTick} />
+                        )}
                         <Tooltip
-                          formatter={(value, name) => {
-                            const units = unitsBySeriesId.get(String(name)) ?? 'Number';
+                          formatter={(value, name, item) => {
+                            const units = resolveTooltipUnits(String(name), item as { dataKey?: string });
                             return formatValue(Number(value), units);
                           }}
                         />
-                        {selectedSeries.slice(0, 2).map((series, idx) => (
+                        {plottedSeries.slice(0, 2).map((series, idx) => (
                           <Area
                             key={series.id}
                             type="monotone"
+                            yAxisId={getAxisId(series)}
                             dataKey={series.id}
                             name={series.title}
                             stroke={SERIES_COLORS[idx % SERIES_COLORS.length]}
@@ -807,95 +953,7 @@ function App() {
                     setNlQuery(query);
                     setTimeout(() => {
                       nlInputRef.current?.focus();
-                      // Simulate the query execution with a small delay
-                      setTimeout(() => {
-                        const q = query.trim();
-                        if (q) {
-                          setNlLoading(true);
-                          setNlError(null);
-                          setNlResult(null);
-                          setNlAnswer(null);
-                          fetch('/api/query', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ query: q }),
-                          })
-                            .then((res) => {
-                              if (!res.ok) throw new Error(`Request failed (${res.status})`);
-                              return res.json() as Promise<{
-                                category?: string; subcategory?: string; measureType?: string;
-                                timeRange?: string; dateFrom?: string; dateTo?: string;
-                                keywords?: string; explanation: string;
-                              }>;
-                            })
-                            .then((data) => {
-                              const newCategory = data.category ?? 'All';
-                              const newSubcategory = data.subcategory ?? 'All';
-                              const newMeasureType = (data.measureType ?? 'All') as 'All' | MeasureType;
-                              const requestedKeywords = data.keywords?.trim() ?? '';
-                              const newFrom = (data.dateFrom || data.dateTo) ? (data.dateFrom ?? null) : null;
-                              const newTo = (data.dateFrom || data.dateTo) ? (data.dateTo ?? null) : null;
-                              const matchesWithKeywords = getSeriesMatches(newCategory, newSubcategory, newMeasureType, requestedKeywords);
-                              const matchesWithoutKeywords = getSeriesMatches(newCategory, newSubcategory, newMeasureType, '');
-                              const effectiveKeywords = requestedKeywords && matchesWithKeywords.length > 0 ? requestedKeywords : '';
-
-                              if (data.category) setCategory(newCategory);
-                              if (data.subcategory) setSubcategory(newSubcategory);
-                              if (data.measureType) setMeasureType(newMeasureType);
-                              if (newFrom || newTo) {
-                                setCustomFrom(newFrom);
-                                setCustomTo(newTo);
-                              } else if (data.timeRange) {
-                                setCustomFrom(null);
-                                setCustomTo(null);
-                                setTimeRange(data.timeRange as RangeOption);
-                              }
-                              setSeriesSearch(effectiveKeywords);
-                              setNlResult({ explanation: data.explanation });
-
-                              if (dataset) {
-                                const answerCandidates = (effectiveKeywords ? matchesWithKeywords : matchesWithoutKeywords);
-                                const matchingSeries = answerCandidates
-                                  .filter((s) => !s.dimensions || Object.keys(s.dimensions).length === 0)
-                                  .slice(0, 3);
-
-                                const topSeries = matchingSeries.length ? matchingSeries
-                                  : matchesWithoutKeywords
-                                      .slice(0, 2);
-
-                                const dateMin = newFrom ? `${newFrom}-01` : null;
-                                const dateMax = newTo ? `${newTo}-31` : null;
-
-                                const seriesPayload = topSeries.map((s) => ({
-                                  title: s.title,
-                                  units: s.units,
-                                  points: s.points
-                                    .filter((p) => (!dateMin || p.date >= dateMin) && (!dateMax || p.date <= dateMax))
-                                    .slice(-24),
-                                }));
-
-                                if (seriesPayload.some((s) => s.points.length > 0)) {
-                                  setNlAnswerLoading(true);
-                                  fetch('/api/answer', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ query: q, series: seriesPayload }),
-                                  })
-                                    .then((r) => r.json() as Promise<{ answer?: string; error?: string }>)
-                                    .then((d) => setNlAnswer(d.answer ?? null))
-                                    .catch(() => setNlAnswer(null))
-                                    .finally(() => setNlAnswerLoading(false));
-                                }
-                              }
-                            })
-                            .catch((e) => {
-                              setNlError(e instanceof Error ? e.message : 'Unknown error');
-                            })
-                            .finally(() => {
-                              setNlLoading(false);
-                            });
-                        }
-                      }, 50);
+                      void runNlQuery(query);
                     }, 0);
                   }}
                   variant="outlined"
@@ -1060,15 +1118,73 @@ function App() {
 
                 <TextField fullWidth label="Search series" value={seriesSearch} onChange={(e) => setSeriesSearch(e.target.value)} />
 
-                <Autocomplete
-                  multiple
-                  options={filteredSeries}
-                  value={selectedSeries}
-                  onChange={(_event, value) => setSelectedSeries(value.slice(0, 6))}
-                  getOptionLabel={(option) => option.title}
-                  isOptionEqualToValue={(option, value) => option.id === value.id}
-                  renderInput={(params) => <TextField {...params} label="Visible series" />}
-                />
+                <Box sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1.5, backgroundColor: 'rgba(15, 76, 129, 0.03)' }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                    Visible series ({selectedSeries.length} selected, {plottedSeries.length} plotted)
+                  </Typography>
+                  <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mt: 0.5, mb: 1 }}>
+                    Use filters first, then tick exactly what you want in the charts.
+                  </Typography>
+                  <Stack direction="row" spacing={1} sx={{ mb: 1.25, flexWrap: 'wrap' }}>
+                    <Button size="small" variant="outlined" onClick={() => setSelectedSeries(filteredSeries)}>
+                      Select all filtered ({filteredSeries.length})
+                    </Button>
+                    <Button size="small" color="inherit" onClick={() => setSelectedSeries([])}>
+                      Clear
+                    </Button>
+                  </Stack>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        size="small"
+                        checked={showAllPlotted}
+                        onChange={(_event, checked) => setShowAllPlotted(checked)}
+                        disabled={selectedSeries.length <= MAX_PLOTTED_SERIES}
+                      />
+                    }
+                    label={showAllPlotted ? 'Plot all selected series' : `Plot top ${MAX_PLOTTED_SERIES} by latest value`}
+                    sx={{ m: 0, mb: 1 }}
+                  />
+                  {useDualMeasureAxes && (
+                    <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mb: 1 }}>
+                      Dual-axis mode is on: values are shown on the left axis, counts on the right axis.
+                    </Typography>
+                  )}
+                  <Box sx={{ maxHeight: 260, overflowY: 'auto', pr: 0.5 }}>
+                    <FormGroup>
+                      {filteredSeries.slice(0, MAX_SERIES_CHECKBOX_ROWS).map((series) => (
+                        <FormControlLabel
+                          key={series.id}
+                          control={
+                            <Checkbox
+                              size="small"
+                              checked={selectedSeriesIdSet.has(series.id)}
+                              onChange={(_event, checked) => {
+                                setSelectedSeries((current) => {
+                                  if (checked) {
+                                    if (current.some((item) => item.id === series.id)) {
+                                      return current;
+                                    }
+                                    return [...current, series];
+                                  }
+
+                                  return current.filter((item) => item.id !== series.id);
+                                });
+                              }}
+                            />
+                          }
+                          label={series.title}
+                          sx={{ alignItems: 'flex-start', m: 0 }}
+                        />
+                      ))}
+                    </FormGroup>
+                  </Box>
+                  {filteredSeries.length > MAX_SERIES_CHECKBOX_ROWS && (
+                    <Typography variant="caption" sx={{ mt: 1, display: 'block', color: 'text.secondary' }}>
+                      Showing first {MAX_SERIES_CHECKBOX_ROWS} options here. Refine filters to narrow the list.
+                    </Typography>
+                  )}
+                </Box>
               </Stack>
             </CardContent>
           </Card>
@@ -1096,18 +1212,26 @@ function App() {
                   <LineChart data={timelineRows}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="label" minTickGap={40} />
-                    <YAxis />
+                    {useDualMeasureAxes ? (
+                      <>
+                        <YAxis yAxisId="value" width={76} tickFormatter={formatValueAxisTick} />
+                        <YAxis yAxisId="count" orientation="right" width={76} tickFormatter={formatAxisTick} />
+                      </>
+                    ) : (
+                      <YAxis yAxisId="left" width={76} tickFormatter={hasValueSeries ? formatValueAxisTick : formatAxisTick} />
+                    )}
                     <Tooltip
-                      formatter={(value, name) => {
-                        const units = unitsBySeriesId.get(String(name)) ?? 'Number';
+                      formatter={(value, name, item) => {
+                        const units = resolveTooltipUnits(String(name), item as { dataKey?: string });
                         return formatValue(Number(value), units);
                       }}
                     />
                     <Legend />
-                    {selectedSeries.map((series, idx) => (
+                    {plottedSeries.map((series, idx) => (
                       <Line
                         key={series.id}
                         type="monotone"
+                        yAxisId={getAxisId(series)}
                         dataKey={series.id}
                         name={series.title}
                         stroke={SERIES_COLORS[idx % SERIES_COLORS.length]}
@@ -1148,17 +1272,25 @@ function App() {
                   <AreaChart data={timelineRows}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="label" minTickGap={40} />
-                    <YAxis />
+                    {useDualMeasureAxes ? (
+                      <>
+                        <YAxis yAxisId="value" width={76} tickFormatter={formatValueAxisTick} />
+                        <YAxis yAxisId="count" orientation="right" width={76} tickFormatter={formatAxisTick} />
+                      </>
+                    ) : (
+                      <YAxis yAxisId="left" width={76} tickFormatter={hasValueSeries ? formatValueAxisTick : formatAxisTick} />
+                    )}
                     <Tooltip
-                      formatter={(value, name) => {
-                        const units = unitsBySeriesId.get(String(name)) ?? 'Number';
+                      formatter={(value, name, item) => {
+                        const units = resolveTooltipUnits(String(name), item as { dataKey?: string });
                         return formatValue(Number(value), units);
                       }}
                     />
-                    {selectedSeries.slice(0, 2).map((series, idx) => (
+                    {plottedSeries.slice(0, 2).map((series, idx) => (
                       <Area
                         key={series.id}
                         type="monotone"
+                        yAxisId={getAxisId(series)}
                         dataKey={series.id}
                         name={series.title}
                         stroke={SERIES_COLORS[idx % SERIES_COLORS.length]}
