@@ -13,6 +13,34 @@ interface AnswerRequest {
   series: SeriesSummary[];
 }
 
+type ErrorResponse = {
+  error: string;
+  code?: string;
+};
+
+function classifyAiError(err: unknown): { status: number; body: ErrorResponse } {
+  const message = err instanceof Error ? err.message : String(err);
+  const lowered = message.toLowerCase();
+
+  if (message.includes('4006') || lowered.includes('daily free allocation')) {
+    return {
+      status: 429,
+      body: {
+        error: 'NLP capacity is temporarily unavailable because the daily AI quota has been reached. Please try again later.',
+        code: 'AI_QUOTA_EXCEEDED',
+      },
+    };
+  }
+
+  return {
+    status: 502,
+    body: {
+      error: message,
+      code: 'AI_UPSTREAM_ERROR',
+    },
+  };
+}
+
 const SYSTEM_PROMPT = `You are a concise analyst for Australian payments data from the Reserve Bank of Australia (RBA).
 
 The user asked a question and you have been provided with the relevant data series. Write a 2-4 sentence natural language answer that:
@@ -33,7 +61,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     if (!context.env.AI) {
-      return Response.json({ error: 'AI binding not available' }, { status: 500 });
+      return Response.json({ error: 'AI binding not available', code: 'AI_BINDING_MISSING' }, { status: 503 });
     }
 
     // Build a compact data summary for the prompt
@@ -62,6 +90,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     return Response.json({ answer });
   } catch (e) {
-    return Response.json({ error: e instanceof Error ? e.message : 'Unknown error' }, { status: 500 });
+    const { status, body } = classifyAiError(e);
+    return Response.json(body, { status });
   }
 };

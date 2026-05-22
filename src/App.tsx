@@ -121,6 +121,28 @@ function matchesSeriesSearch(series: PaymentSeries, search: string) {
     .every((term) => haystack.includes(term));
 }
 
+function getNlErrorMessage(status: number, serverError?: string) {
+  if (status === 429) {
+    return serverError ?? 'NLP is temporarily unavailable because the daily AI quota has been reached. Please try again later.';
+  }
+  if (status === 503) {
+    return serverError ?? 'NLP service is currently unavailable. Please try again shortly.';
+  }
+  if (serverError) {
+    return serverError;
+  }
+  return `Request failed (${status})`;
+}
+
+async function parseApiError(res: Response) {
+  try {
+    const data = await res.json() as { error?: string };
+    return getNlErrorMessage(res.status, data.error);
+  } catch {
+    return getNlErrorMessage(res.status);
+  }
+}
+
 function App() {
   const [dataset, setDataset] = useState<DatasetPayload | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -237,8 +259,8 @@ function App() {
     setSelectedSeries([]);
   };
 
-  const handleNlQuery = async () => {
-    const q = nlQuery.trim();
+  const handleNlQuery = async (queryText?: string) => {
+    const q = (queryText ?? nlQuery).trim();
     if (!q) return;
     setNlLoading(true);
     setNlError(null);
@@ -250,7 +272,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: q }),
       });
-      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      if (!res.ok) throw new Error(await parseApiError(res));
       const data = await res.json() as {
         category?: string; subcategory?: string; measureType?: string;
         timeRange?: string; dateFrom?: string; dateTo?: string;
@@ -310,7 +332,12 @@ function App() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ query: q, series: seriesPayload }),
           })
-            .then((r) => r.json() as Promise<{ answer?: string; error?: string }>)
+            .then(async (r) => {
+              if (!r.ok) {
+                throw new Error(await parseApiError(r));
+              }
+              return r.json() as Promise<{ answer?: string; error?: string }>;
+            })
             .then((d) => setNlAnswer(d.answer ?? null))
             .catch(() => setNlAnswer(null))
             .finally(() => setNlAnswerLoading(false));
@@ -782,7 +809,7 @@ function App() {
               input: {
                 endAdornment: (
                   <InputAdornment position="end">
-                    <IconButton onClick={handleNlQuery} disabled={nlLoading || !nlQuery.trim()} edge="end">
+                    <IconButton onClick={() => { void handleNlQuery(); }} disabled={nlLoading || !nlQuery.trim()} edge="end">
                       {nlLoading ? <CircularProgress size={20} /> : <AutoFixHighIcon />}
                     </IconButton>
                   </InputAdornment>
@@ -805,98 +832,8 @@ function App() {
                   label={query}
                   onClick={() => {
                     setNlQuery(query);
-                    setTimeout(() => {
-                      nlInputRef.current?.focus();
-                      // Simulate the query execution with a small delay
-                      setTimeout(() => {
-                        const q = query.trim();
-                        if (q) {
-                          setNlLoading(true);
-                          setNlError(null);
-                          setNlResult(null);
-                          setNlAnswer(null);
-                          fetch('/api/query', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ query: q }),
-                          })
-                            .then((res) => {
-                              if (!res.ok) throw new Error(`Request failed (${res.status})`);
-                              return res.json() as Promise<{
-                                category?: string; subcategory?: string; measureType?: string;
-                                timeRange?: string; dateFrom?: string; dateTo?: string;
-                                keywords?: string; explanation: string;
-                              }>;
-                            })
-                            .then((data) => {
-                              const newCategory = data.category ?? 'All';
-                              const newSubcategory = data.subcategory ?? 'All';
-                              const newMeasureType = (data.measureType ?? 'All') as 'All' | MeasureType;
-                              const requestedKeywords = data.keywords?.trim() ?? '';
-                              const newFrom = (data.dateFrom || data.dateTo) ? (data.dateFrom ?? null) : null;
-                              const newTo = (data.dateFrom || data.dateTo) ? (data.dateTo ?? null) : null;
-                              const matchesWithKeywords = getSeriesMatches(newCategory, newSubcategory, newMeasureType, requestedKeywords);
-                              const matchesWithoutKeywords = getSeriesMatches(newCategory, newSubcategory, newMeasureType, '');
-                              const effectiveKeywords = requestedKeywords && matchesWithKeywords.length > 0 ? requestedKeywords : '';
-
-                              if (data.category) setCategory(newCategory);
-                              if (data.subcategory) setSubcategory(newSubcategory);
-                              if (data.measureType) setMeasureType(newMeasureType);
-                              if (newFrom || newTo) {
-                                setCustomFrom(newFrom);
-                                setCustomTo(newTo);
-                              } else if (data.timeRange) {
-                                setCustomFrom(null);
-                                setCustomTo(null);
-                                setTimeRange(data.timeRange as RangeOption);
-                              }
-                              setSeriesSearch(effectiveKeywords);
-                              setNlResult({ explanation: data.explanation });
-
-                              if (dataset) {
-                                const answerCandidates = (effectiveKeywords ? matchesWithKeywords : matchesWithoutKeywords);
-                                const matchingSeries = answerCandidates
-                                  .filter((s) => !s.dimensions || Object.keys(s.dimensions).length === 0)
-                                  .slice(0, 3);
-
-                                const topSeries = matchingSeries.length ? matchingSeries
-                                  : matchesWithoutKeywords
-                                      .slice(0, 2);
-
-                                const dateMin = newFrom ? `${newFrom}-01` : null;
-                                const dateMax = newTo ? `${newTo}-31` : null;
-
-                                const seriesPayload = topSeries.map((s) => ({
-                                  title: s.title,
-                                  units: s.units,
-                                  points: s.points
-                                    .filter((p) => (!dateMin || p.date >= dateMin) && (!dateMax || p.date <= dateMax))
-                                    .slice(-24),
-                                }));
-
-                                if (seriesPayload.some((s) => s.points.length > 0)) {
-                                  setNlAnswerLoading(true);
-                                  fetch('/api/answer', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ query: q, series: seriesPayload }),
-                                  })
-                                    .then((r) => r.json() as Promise<{ answer?: string; error?: string }>)
-                                    .then((d) => setNlAnswer(d.answer ?? null))
-                                    .catch(() => setNlAnswer(null))
-                                    .finally(() => setNlAnswerLoading(false));
-                                }
-                              }
-                            })
-                            .catch((e) => {
-                              setNlError(e instanceof Error ? e.message : 'Unknown error');
-                            })
-                            .finally(() => {
-                              setNlLoading(false);
-                            });
-                        }
-                      }, 50);
-                    }, 0);
+                    nlInputRef.current?.focus();
+                    void handleNlQuery(query);
                   }}
                   variant="outlined"
                   size="small"

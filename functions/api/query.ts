@@ -17,6 +17,34 @@ interface QueryResponse {
   explanation: string;
 }
 
+type ErrorResponse = {
+  error: string;
+  code?: string;
+};
+
+function classifyAiError(err: unknown): { status: number; body: ErrorResponse } {
+  const message = err instanceof Error ? err.message : String(err);
+  const lowered = message.toLowerCase();
+
+  if (message.includes('4006') || lowered.includes('daily free allocation')) {
+    return {
+      status: 429,
+      body: {
+        error: 'NLP capacity is temporarily unavailable because the daily AI quota has been reached. Please try again later.',
+        code: 'AI_QUOTA_EXCEEDED',
+      },
+    };
+  }
+
+  return {
+    status: 502,
+    body: {
+      error: message,
+      code: 'AI_UPSTREAM_ERROR',
+    },
+  };
+}
+
 const SYSTEM_PROMPT = `You are a helpful assistant for an Australian payments data explorer powered by Reserve Bank of Australia (RBA) data.
 
 The user will ask a natural language question about payments data. Your job is to extract filter parameters from their question and return a JSON object.
@@ -89,7 +117,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     if (!context.env.AI) {
-      return Response.json({ error: 'AI binding not available' }, { status: 500 });
+      return Response.json({ error: 'AI binding not available', code: 'AI_BINDING_MISSING' }, { status: 503 });
     }
 
     const response = await context.env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
@@ -114,20 +142,20 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     } else if (typeof inner === 'string') {
       const jsonMatch = (inner as string).trim().match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
-        return Response.json({ error: 'Could not parse AI response', raw: inner }, { status: 500 });
+        return Response.json({ error: 'Could not parse AI response', code: 'AI_PARSE_ERROR', raw: inner }, { status: 502 });
       }
       try {
         parsed = JSON.parse(jsonMatch[0]) as QueryResponse;
       } catch {
-        return Response.json({ error: 'Invalid JSON from AI', raw: inner }, { status: 500 });
+        return Response.json({ error: 'Invalid JSON from AI', code: 'AI_PARSE_ERROR', raw: inner }, { status: 502 });
       }
     } else {
-      return Response.json({ error: 'Unexpected AI response shape', raw: JSON.stringify(aiResponse) }, { status: 500 });
+      return Response.json({ error: 'Unexpected AI response shape', code: 'AI_PARSE_ERROR', raw: JSON.stringify(aiResponse) }, { status: 502 });
     }
 
     return Response.json(parsed);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return Response.json({ error: message }, { status: 500 });
+    const { status, body } = classifyAiError(err);
+    return Response.json(body, { status });
   }
 };
