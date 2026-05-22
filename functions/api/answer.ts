@@ -17,6 +17,8 @@ interface AnswerRequest {
 const ANSWER_CACHE_TTL_MS = 2 * 60 * 60 * 1000;
 const ANSWER_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60;
 const answerCache = new Map<string, { expiresAt: number; value: string }>();
+const ANSWER_MODELS = ['@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/meta/llama-3.1-8b-instruct'];
+const ANSWER_MAX_TOKENS = 160;
 
 function normalizeQuery(query: string) {
   return query.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -50,7 +52,7 @@ function buildSeriesSignature(series: SeriesSummary[]) {
 
 function buildCacheKey(query: string, datasetVersion: string | undefined, series: SeriesSummary[]) {
   const payloadSig = `${normalizeQuery(query)}::${buildSeriesSignature(series)}`;
-  return `answer:v1:${normalizeDatasetVersion(datasetVersion)}:${hashString(payloadSig)}`;
+  return `answer:v2:${normalizeDatasetVersion(datasetVersion)}:${hashString(payloadSig)}`;
 }
 
 function buildEdgeRequest(cacheKey: string) {
@@ -228,6 +230,72 @@ function buildDeterministicAnswer(_query: string, series: SeriesSummary[]) {
   return lines.join(' ');
 }
 
+const SYSTEM_PROMPT = `You are an analyst writing concise answers about payments data.
+
+Rules:
+- Answer the user's exact question directly.
+- Use the provided metrics and time periods.
+- Prefer a clear yes/no first when the question implies it.
+- Include specific numbers and dates.
+- 2-4 sentences maximum.
+- Plain text only.`;
+
+function buildSeriesAnalytics(series: SeriesSummary[]) {
+  return series.slice(0, 3).map((s) => {
+    const pts = s.points.filter((p) => Number.isFinite(p.value));
+    const latest = pts[pts.length - 1] ?? null;
+    const previous = pts[pts.length - 2] ?? null;
+    const changes = calculateChanges(pts);
+    const maxIncrease = changes
+      .filter((c) => c.pct !== null)
+      .sort((a, b) => (b.pct ?? Number.NEGATIVE_INFINITY) - (a.pct ?? Number.NEGATIVE_INFINITY))[0] ?? null;
+
+    return {
+      title: s.title,
+      units: s.units,
+      latest: latest ? { date: latest.date, value: latest.value } : null,
+      previous: previous ? { date: previous.date, value: previous.value } : null,
+      latestChangePct: latest && previous && previous.value !== 0
+        ? ((latest.value - previous.value) / Math.abs(previous.value)) * 100
+        : null,
+      maxIncreasePct: maxIncrease?.pct ?? null,
+      maxIncreaseDate: maxIncrease?.date ?? null,
+      recentChangesPct: changes.slice(-3).map((c) => c.pct),
+    };
+  });
+}
+
+async function runAnswerModel(ai: Ai, query: string, analytics: ReturnType<typeof buildSeriesAnalytics>) {
+  const userPrompt = `Question: ${query}\n\nSeries analytics:\n${JSON.stringify(analytics)}`;
+  let lastError: unknown = null;
+
+  for (const model of ANSWER_MODELS) {
+    try {
+      const response = await ai.run(model, {
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: userPrompt },
+        ],
+        max_tokens: ANSWER_MAX_TOKENS,
+      });
+
+      const aiResponse = response as unknown;
+      const inner = aiResponse && typeof aiResponse === 'object'
+        ? (aiResponse as Record<string, unknown>).response
+        : aiResponse;
+      const answer = typeof inner === 'string' ? inner.trim() : JSON.stringify(inner);
+
+      if (answer) {
+        return answer;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError ?? new Error('No answer model available');
+}
+
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   try {
     const body = await context.request.json<AnswerRequest>();
@@ -258,7 +326,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return Response.json({ answer: edgeCached });
     }
 
-    const answer = buildDeterministicAnswer(query, normalizedSeries);
+    let answer = buildDeterministicAnswer(query, normalizedSeries);
+    if (context.env.AI) {
+      try {
+        const analytics = buildSeriesAnalytics(normalizedSeries);
+        answer = await runAnswerModel(context.env.AI, query, analytics);
+      } catch {
+        // Fallback to deterministic answer when model is unavailable/quota-limited.
+      }
+    }
 
     answerCache.set(cacheKey, {
       value: answer,
