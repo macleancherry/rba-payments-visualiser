@@ -183,6 +183,44 @@ function answerSustainedAcceleration(series: SeriesSummary[]) {
   return `${sustained ? 'Yes, mostly' : 'Not consistently'} — PayTo has risen in ${positiveCount} of the last 3 periods, with the latest move ${latestPct}% in ${formatPeriod(latest.date)}.`;
 }
 
+function detectCalculatedMetricIntent(query: string) {
+  const q = query.toLowerCase();
+  if (/\baverage\b.*\btransaction.*size\b|\btransaction.*size.*\baverage\b|\bper.*transaction\b/.test(q)) {
+    return 'averageTransactionSize';
+  }
+  return null;
+}
+
+function answerAverageTransactionSize(query: string, series: SeriesSummary[]) {
+  const valueSeriesNames = ['value', 'dollar', 'spend', '$', 'million'];
+  const volumeSeriesNames = ['volume', 'number', 'count', 'transaction'];
+
+  const valueSeries = series.find((s) =>
+    valueSeriesNames.some((kw) => s.title.toLowerCase().includes(kw)) &&
+    s.title.toLowerCase().includes('value'),
+  );
+  const volumeSeries = series.find((s) =>
+    volumeSeriesNames.some((kw) => s.title.toLowerCase().includes(kw)) &&
+    !s.title.toLowerCase().includes('value'),
+  );
+
+  if (!valueSeries || !volumeSeries) {
+    return null;
+  }
+
+  const valueLatest = valueSeries.points[valueSeries.points.length - 1];
+  const volLatest = volumeSeries.points[volumeSeries.points.length - 1];
+
+  if (!valueLatest || !volLatest || volLatest.value === 0) {
+    return null;
+  }
+
+  const average = valueLatest.value / volLatest.value;
+  const avgFormatted = new Intl.NumberFormat('en-AU', { maximumFractionDigits: 2 }).format(average);
+
+  return `Average transaction size for ${query.split(' for ')[1] || 'the selected category'} is ${avgFormatted} in ${formatPeriod(valueLatest.date)}.`;
+}
+
 function toKeywords(text: string) {
   return normalizeQuery(text)
     .replace(/[^a-z0-9\s]/g, ' ')
@@ -245,6 +283,14 @@ function answerExtremeMonth(query: string, series: SeriesSummary[], kind: 'highe
 
 function buildDeterministicAnswer(_query: string, series: SeriesSummary[]) {
   const query = _query.toLowerCase();
+  const calculatedMetric = detectCalculatedMetricIntent(query);
+  if (calculatedMetric === 'averageTransactionSize') {
+    const avg = answerAverageTransactionSize(_query, series);
+    if (avg) {
+      return avg;
+    }
+  }
+
   if (/highest|max(imum)?|peak|top/.test(query) && /month/.test(query)) {
     const highest = answerExtremeMonth(query, series, 'highest');
     if (highest) {

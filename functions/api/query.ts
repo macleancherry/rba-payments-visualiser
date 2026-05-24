@@ -134,6 +134,8 @@ function extractWithRules(query: string): QueryResponse | null {
     measureType = 'volume';
   } else if (/\baccounts?\b|\bon issue\b/.test(q)) {
     measureType = 'accounts';
+  } else if (/\baverage\b|\bper.*transaction\b|\bmean\b/.test(q)) {
+    measureType = null;
   }
 
   const rangeMatch = q.match(/\blast\s+(2|5|10)\s+years?\b/);
