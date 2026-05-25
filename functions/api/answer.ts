@@ -52,7 +52,7 @@ function buildSeriesSignature(series: SeriesSummary[]) {
 
 function buildCacheKey(query: string, datasetVersion: string | undefined, series: SeriesSummary[]) {
   const payloadSig = `${normalizeQuery(query)}::${buildSeriesSignature(series)}`;
-  return `answer:v3:${normalizeDatasetVersion(datasetVersion)}:${hashString(payloadSig)}`;
+  return `answer:v4:${normalizeDatasetVersion(datasetVersion)}:${hashString(payloadSig)}`;
 }
 
 function buildEdgeRequest(cacheKey: string) {
@@ -191,34 +191,101 @@ function detectCalculatedMetricIntent(query: string) {
   return null;
 }
 
+function normalizePaymentTypeKey(title: string) {
+  const t = title.toLowerCase();
+  if (t.includes('credit and charge')) return 'Credit and Charge';
+  if (t.includes('debit')) return 'Debit';
+  if (t.includes('prepaid')) return 'Prepaid';
+  if (t.includes('payto')) return 'PayTo';
+  if (t.includes('npp')) return 'NPP';
+  if (t.includes('credit transfer')) return 'Direct Credit';
+  if (t.includes('debit transfer')) return 'Direct Debit';
+
+  const prefixMatch = title.match(/^([^:]+):/);
+  if (prefixMatch?.[1]) {
+    return prefixMatch[1].trim();
+  }
+
+  return null;
+}
+
+function isValueSeriesTitle(title: string) {
+  const t = title.toLowerCase();
+  return t.includes('value') && !t.includes('average');
+}
+
+function isVolumeSeriesTitle(title: string) {
+  const t = title.toLowerCase();
+  return (t.includes('number') || t.includes('volume') || t.includes('count')) && !t.includes('value');
+}
+
+function shouldPreferDeterministic(query: string) {
+  const q = query.toLowerCase();
+  return Boolean(
+    detectCalculatedMetricIntent(q)
+    || ((/highest|max(imum)?|peak|top/.test(q) || /lowest|min(imum)?|trough|bottom/.test(q)) && /month/.test(q))
+    || /spike|biggest increase|max(imum)? increase|growth spike/.test(q)
+    || (/overtaken|overtake|momentum/.test(q) && /npp|direct entry/.test(q))
+    || (/acceleration|accelerating|sustained/.test(q) && /payto/.test(q))
+  );
+}
+
 function answerAverageTransactionSize(query: string, series: SeriesSummary[]) {
-  const valueSeriesNames = ['value', 'dollar', 'spend', '$', 'million'];
-  const volumeSeriesNames = ['volume', 'number', 'count', 'transaction'];
+  const q = query.toLowerCase();
+  const byType = /\beach\b.*\bpayment\s+type\b|\bby\b.*\bpayment\s+type\b|\bpayment\s+types?\b/.test(q);
 
-  const valueSeries = series.find((s) =>
-    valueSeriesNames.some((kw) => s.title.toLowerCase().includes(kw)) &&
-    s.title.toLowerCase().includes('value'),
-  );
-  const volumeSeries = series.find((s) =>
-    volumeSeriesNames.some((kw) => s.title.toLowerCase().includes(kw)) &&
-    !s.title.toLowerCase().includes('value'),
-  );
+  const grouped = new Map<string, { value?: SeriesSummary; volume?: SeriesSummary }>();
+  for (const s of series) {
+    const key = normalizePaymentTypeKey(s.title);
+    if (!key) continue;
 
-  if (!valueSeries || !volumeSeries) {
+    const current = grouped.get(key) ?? {};
+    if (isValueSeriesTitle(s.title)) {
+      current.value = s;
+    }
+    if (isVolumeSeriesTitle(s.title)) {
+      current.volume = s;
+    }
+    grouped.set(key, current);
+  }
+
+  const rows: Array<{ key: string; avg: number; date: string }> = [];
+  for (const [key, pair] of grouped.entries()) {
+    const valueLatest = pair.value?.points[pair.value.points.length - 1];
+    const volumeLatest = pair.volume?.points[pair.volume.points.length - 1];
+    if (!valueLatest || !volumeLatest || volumeLatest.value === 0) {
+      continue;
+    }
+    rows.push({
+      key,
+      avg: valueLatest.value / volumeLatest.value,
+      date: valueLatest.date,
+    });
+  }
+
+  if (!rows.length) {
     return null;
   }
 
-  const valueLatest = valueSeries.points[valueSeries.points.length - 1];
-  const volLatest = volumeSeries.points[volumeSeries.points.length - 1];
+  if (byType) {
+    const formatter = new Intl.NumberFormat('en-AU', { maximumFractionDigits: 2 });
+    const sorted = rows.sort((a, b) => b.avg - a.avg).slice(0, 8);
+    const lines = sorted.map((r) => `${r.key}: $${formatter.format(r.avg)}`);
+    const date = formatPeriod(sorted[0].date);
+    return `Average transaction size by payment type (${date}): ${lines.join('; ')}.`;
+  }
 
-  if (!valueLatest || !volLatest || volLatest.value === 0) {
+  const preferredOrder = ['Credit and Charge', 'Debit', 'Prepaid', 'NPP', 'PayTo', 'Direct Credit', 'Direct Debit'];
+  const picked = preferredOrder
+    .map((name) => rows.find((r) => r.key === name))
+    .find(Boolean) ?? rows[0];
+
+  if (!picked) {
     return null;
   }
 
-  const average = valueLatest.value / volLatest.value;
-  const avgFormatted = new Intl.NumberFormat('en-AU', { maximumFractionDigits: 2 }).format(average);
-
-  return `Average transaction size for ${query.split(' for ')[1] || 'the selected category'} is ${avgFormatted} in ${formatPeriod(valueLatest.date)}.`;
+  const avgFormatted = new Intl.NumberFormat('en-AU', { maximumFractionDigits: 2 }).format(picked.avg);
+  return `Average transaction size for ${picked.key} is $${avgFormatted} in ${formatPeriod(picked.date)}.`;
 }
 
 function toKeywords(text: string) {
@@ -451,11 +518,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return Response.json({ answer: edgeCached });
     }
 
-    let answer = buildDeterministicAnswer(query, normalizedSeries);
-    if (context.env.AI) {
+    const deterministicAnswer = buildDeterministicAnswer(query, normalizedSeries);
+    let answer = deterministicAnswer;
+    if (context.env.AI && !shouldPreferDeterministic(query)) {
       try {
         const analytics = buildSeriesAnalytics(normalizedSeries);
-        answer = await runAnswerModel(context.env.AI, query, analytics);
+        const modelAnswer = await runAnswerModel(context.env.AI, query, analytics);
+        if (modelAnswer) {
+          answer = modelAnswer;
+        }
       } catch {
         // Fallback to deterministic answer when model is unavailable/quota-limited.
       }

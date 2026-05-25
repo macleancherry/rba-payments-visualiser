@@ -95,6 +95,16 @@ const DEFAULT_SELECTED_SERIES_TITLES = [
   'Total number of cheques',
 ];
 
+const AVERAGE_TRANSACTION_SIZE_SERIES_PAIRS = [
+  { valueMatch: 'debit: value of purchases', volumeMatch: 'debit: number of purchases' },
+  { valueMatch: 'credit and charge: value of purchases', volumeMatch: 'credit and charge: number of purchases' },
+  { valueMatch: 'prepaid: value of purchases', volumeMatch: 'prepaid: number of purchases' },
+  { valueMatch: 'value of npp payments', volumeMatch: 'total number of npp payments' },
+  { valueMatch: 'value of payto transactions', volumeMatch: 'number of payto transactions' },
+  { valueMatch: 'value of credit transfers', volumeMatch: 'number of credit transfers' },
+  { valueMatch: 'value of debit transfers', volumeMatch: 'number of debit transfers' },
+];
+
 const RANGE_YEARS: Record<Exclude<RangeOption, 'ALL'>, number> = {
   '2Y': 2,
   '5Y': 5,
@@ -351,6 +361,57 @@ function App() {
 
       // Compute relevant series for the answer using the new filter values
       if (dataset) {
+        const averageTxnSizeIntent = /\baverage\b.*\btransaction\b.*\bsize\b|\bper\s+transaction\b/i.test(q);
+        const eachPaymentTypeIntent = /\beach\b.*\bpayment\s+type\b|\bby\b.*\bpayment\s+type\b|\bpayment\s+types?\b/i.test(q);
+
+        if (averageTxnSizeIntent && eachPaymentTypeIntent) {
+          const dateMin = newFrom ? `${newFrom}-01` : null;
+          const dateMax = newTo ? `${newTo}-31` : null;
+          const derivedSeriesPayload = AVERAGE_TRANSACTION_SIZE_SERIES_PAIRS.flatMap((pair) => {
+            const valueSeries = dataset.series.find((candidate) =>
+              candidate.title.toLowerCase().includes(pair.valueMatch)
+              && (!candidate.dimensions || Object.keys(candidate.dimensions).length === 0),
+            );
+            const volumeSeries = dataset.series.find((candidate) =>
+              candidate.title.toLowerCase().includes(pair.volumeMatch)
+              && (!candidate.dimensions || Object.keys(candidate.dimensions).length === 0),
+            );
+
+            const mapped = [valueSeries, volumeSeries]
+              .filter(Boolean)
+              .map((s) => ({
+                title: s!.title,
+                units: s!.units,
+                points: s!.points
+                  .filter((p) => (!dateMin || p.date >= dateMin) && (!dateMax || p.date <= dateMax))
+                  .slice(-24),
+              }))
+              .filter((s) => s.points.length > 0);
+
+            return mapped;
+          });
+
+          if (derivedSeriesPayload.length) {
+            setNlAnswerLoading(true);
+            fetch('/api/answer', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ query: q, datasetVersion: dataset?.generatedAt, series: derivedSeriesPayload }),
+            })
+              .then(async (r) => {
+                if (!r.ok) {
+                  throw new Error(await parseApiError(r));
+                }
+                return r.json() as Promise<{ answer?: string; error?: string }>;
+              })
+              .then((d) => setNlAnswer(d.answer ?? null))
+              .catch(() => setNlAnswer(null))
+              .finally(() => setNlAnswerLoading(false));
+
+            return;
+          }
+        }
+
         const answerCandidates = (effectiveKeywords ? matchesWithKeywords : matchesWithoutKeywords);
         const matchingSeries = answerCandidates
           .filter((s) => !s.dimensions || Object.keys(s.dimensions).length === 0) // prefer aggregates
