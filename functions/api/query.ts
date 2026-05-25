@@ -128,14 +128,16 @@ function extractWithRules(query: string): QueryResponse | null {
     category = 'Cards';
   }
 
-  if (/\bvalue\b|\bspend\w*\b|\bdollar\b|\$/.test(q)) {
+  const averageIntent = /\baverage\b|\bper.*transaction\b|\bmean\b/.test(q);
+  if (averageIntent) {
+    // Derived metrics need both value and volume candidates, so avoid narrowing here.
+    measureType = null;
+  } else if (/\bvalue\b|\bspend\w*\b|\bdollar\b|\$/.test(q)) {
     measureType = 'value';
   } else if (/\bnumber\b|\bhow many\b|\bcount\b|\btransactions?\b|\bvolume\b/.test(q)) {
     measureType = 'volume';
   } else if (/\baccounts?\b|\bon issue\b/.test(q)) {
     measureType = 'accounts';
-  } else if (/\baverage\b|\bper.*transaction\b|\bmean\b/.test(q)) {
-    measureType = null;
   }
 
   const rangeMatch = q.match(/\blast\s+(2|5|10)\s+years?\b/);
