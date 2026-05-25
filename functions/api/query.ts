@@ -82,6 +82,8 @@ async function setEdgeCache(cacheKey: string, value: QueryResponse) {
 
 function extractWithRules(query: string): QueryResponse | null {
   const q = query.toLowerCase();
+  const averageIntent = /\baverage\b|\bper.*transaction\b|\bmean\b/.test(q);
+  const eachTypeIntent = /\beach\b.*\b(?:payment|transaction)\s+type\b|\bby\b.*\b(?:payment|transaction)\s+type\b|\b(?:payment|transaction)\s+types?\b/.test(q);
 
   let category: string | null = null;
   let subcategory: string | null = null;
@@ -128,7 +130,6 @@ function extractWithRules(query: string): QueryResponse | null {
     category = 'Cards';
   }
 
-  const averageIntent = /\baverage\b|\bper.*transaction\b|\bmean\b/.test(q);
   if (averageIntent) {
     // Derived metrics need both value and volume candidates, so avoid narrowing here.
     measureType = null;
@@ -194,7 +195,7 @@ function extractWithRules(query: string): QueryResponse | null {
     keywords = 'mobile wallet';
   }
 
-  if (!category && !subcategory && !measureType && !timeRange && !dateFrom && !dateTo && !keywords) {
+  if (!category && !subcategory && !measureType && !timeRange && !dateFrom && !dateTo && !keywords && !averageIntent && !eachTypeIntent) {
     return null;
   }
 
@@ -206,6 +207,10 @@ function extractWithRules(query: string): QueryResponse | null {
     dateFrom && !dateTo ? `since ${dateFrom}` : null,
   ].filter(Boolean);
 
+  const explanation = explanationParts.join(' ') || (averageIntent
+    ? (eachTypeIntent ? 'Average transaction size by payment type' : 'Average transaction size query')
+    : 'Payments query');
+
   return {
     category,
     subcategory,
@@ -214,7 +219,25 @@ function extractWithRules(query: string): QueryResponse | null {
     dateFrom,
     dateTo,
     keywords,
-    explanation: explanationParts.join(' '),
+    explanation,
+  };
+}
+
+function buildSafeFallbackResponse(query: string): QueryResponse {
+  const ruleBased = extractWithRules(query);
+  if (ruleBased) {
+    return ruleBased;
+  }
+
+  return {
+    category: null,
+    subcategory: null,
+    measureType: null,
+    timeRange: null,
+    dateFrom: null,
+    dateTo: null,
+    keywords: null,
+    explanation: 'General payments query',
   };
 }
 
@@ -343,15 +366,18 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     } else if (typeof inner === 'string') {
       const jsonMatch = (inner as string).trim().match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
-        return Response.json({ error: 'Could not parse AI response', code: 'AI_PARSE_ERROR', raw: inner }, { status: 502 });
+        const fallback = buildSafeFallbackResponse(query);
+        return Response.json(fallback);
       }
       try {
         parsed = JSON.parse(jsonMatch[0]) as QueryResponse;
       } catch {
-        return Response.json({ error: 'Invalid JSON from AI', code: 'AI_PARSE_ERROR', raw: inner }, { status: 502 });
+        const fallback = buildSafeFallbackResponse(query);
+        return Response.json(fallback);
       }
     } else {
-      return Response.json({ error: 'Unexpected AI response shape', code: 'AI_PARSE_ERROR', raw: JSON.stringify(aiResponse) }, { status: 502 });
+      const fallback = buildSafeFallbackResponse(query);
+      return Response.json(fallback);
     }
 
     queryCache.set(cacheKey, {
