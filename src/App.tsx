@@ -83,6 +83,8 @@ type DatasetPayload = {
 const SERIES_COLORS = ['#0f4c81', '#11b5a4', '#ff7a59', '#0a2f5a', '#23a6d5', '#f4b400'];
 const MAX_SERIES_CHECKBOX_ROWS = 120;
 const MAX_PLOTTED_SERIES = 8;
+const MAX_RECENT_QUERIES = 3;
+const RECENT_QUERY_STORAGE_KEY = 'rba-recent-nl-queries';
 const DEFAULT_SELECTED_SERIES_TITLES = [
   'Debit: Value of purchases',
   'Credit and Charge: Value of purchases',
@@ -92,6 +94,11 @@ const DEFAULT_SELECTED_SERIES_TITLES = [
   'Debit: Value of mobile wallet transactions',
   'Total number of cash withdrawals by debit cards',
   'Total number of cheques',
+];
+const DEFAULT_TRY_QUERIES = [
+  'When did card payment growth spike the most?',
+  'Has NPP overtaken direct entry in momentum?',
+  'Is PayTo acceleration sustained across recent quarters?',
 ];
 
 const RANGE_YEARS: Record<Exclude<RangeOption, 'ALL'>, number> = {
@@ -230,6 +237,7 @@ function App() {
   const [dimInstrument, setDimInstrument] = useState('All');
 
   const [nlQuery, setNlQuery] = useState('');
+  const [recentQueries, setRecentQueries] = useState<string[]>([]);
   const [nlLoading, setNlLoading] = useState(false);
   const [nlResult, setNlResult] = useState<{ explanation: string } | null>(null);
   const [nlError, setNlError] = useState<string | null>(null);
@@ -244,6 +252,63 @@ function App() {
   const [trendInsightLoading, setTrendInsightLoading] = useState(false);
   const [volumeInsight, setVolumeInsight] = useState<string | null>(null);
   const [volumeInsightLoading, setVolumeInsightLoading] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(RECENT_QUERY_STORAGE_KEY);
+      if (!raw) {
+        return;
+      }
+
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        return;
+      }
+
+      const cleaned = parsed
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .slice(0, MAX_RECENT_QUERIES);
+
+      setRecentQueries(cleaned);
+    } catch {
+      // Ignore malformed local storage payloads.
+    }
+  }, []);
+
+  const rememberRecentQuery = (query: string) => {
+    const clean = query.trim();
+    if (!clean) {
+      return;
+    }
+
+    setRecentQueries((current) => {
+      const next = [clean, ...current.filter((item) => item.toLowerCase() !== clean.toLowerCase())]
+        .slice(0, MAX_RECENT_QUERIES);
+
+      try {
+        localStorage.setItem(RECENT_QUERY_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // Ignore local storage write errors (privacy mode, quota, etc.).
+      }
+
+      return next;
+    });
+  };
+
+  const quickQueryOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const combined = [...recentQueries, ...DEFAULT_TRY_QUERIES];
+    return combined.filter((query) => {
+      const key = query.toLowerCase();
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  }, [recentQueries]);
 
   const generateChartInsights = async (series: PaymentSeries[], timelineData: Array<Record<string, number | string | null>>) => {
     if (!series.length || !timelineData.length) return;
@@ -331,6 +396,7 @@ function App() {
   const handleNlQuery = async (queryText?: string) => {
     const q = (queryText ?? nlQuery).trim();
     if (!q) return;
+    rememberRecentQuery(q);
     setNlLoading(true);
     setNlError(null);
     setNlResult(null);
@@ -991,11 +1057,7 @@ function App() {
               Try these queries:
             </Typography>
             <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5 }}>
-              {[
-                'When did card payment growth spike the most?',
-                'Has NPP overtaken direct entry in momentum?',
-                'Is PayTo acceleration sustained across recent quarters?',
-              ].map((query) => (
+              {quickQueryOptions.map((query) => (
                 <Chip
                   key={query}
                   label={query}
