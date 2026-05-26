@@ -119,6 +119,17 @@ function formatValue(value: number, units: string) {
   return `${isCurrency ? '$' : ''}${Math.round(absoluteValue).toLocaleString()}`;
 }
 
+function getUnitScale(units: string) {
+  const unit = units.toLowerCase();
+  if (unit.includes("'000")) {
+    return 1_000;
+  }
+  if (unit.includes('million')) {
+    return 1_000_000;
+  }
+  return 1;
+}
+
 function shortenLabel(label: string, max = 34) {
   return label.length <= max ? label : `${label.slice(0, max - 1)}…`;
 }
@@ -128,13 +139,13 @@ const compactNumberFormatter = new Intl.NumberFormat('en-AU', {
   maximumFractionDigits: 1,
 });
 
-function formatAxisTick(value: number | string) {
+function formatAxisTick(value: number | string, scale = 1) {
   const numeric = Number(value);
   if (Number.isNaN(numeric)) {
     return String(value);
   }
 
-  return compactNumberFormatter.format(numeric);
+  return compactNumberFormatter.format(numeric * scale);
 }
 
 function formatValueAxisTick(value: number | string) {
@@ -558,6 +569,25 @@ function App() {
 
   const useDualMeasureAxes = hasValueSeries && hasNonValueSeries;
 
+  const inferAxisScale = (seriesList: PaymentSeries[]) => {
+    if (!seriesList.length) {
+      return 1;
+    }
+
+    const uniqueScales = Array.from(new Set(seriesList.map((series) => getUnitScale(series.units))));
+    return uniqueScales.length === 1 ? uniqueScales[0] : 1;
+  };
+
+  const countAxisScale = useMemo(
+    () => inferAxisScale(plottedSeries.filter((series) => series.measureType !== 'value')),
+    [plottedSeries],
+  );
+
+  const leftAxisScale = useMemo(
+    () => inferAxisScale(plottedSeries),
+    [plottedSeries],
+  );
+
   const getAxisId = (series: PaymentSeries) => {
     if (!useDualMeasureAxes) {
       return 'left';
@@ -747,10 +777,10 @@ function App() {
                     {useDualMeasureAxes ? (
                       <>
                         <YAxis yAxisId="value" width={76} tickFormatter={formatValueAxisTick} />
-                        <YAxis yAxisId="count" orientation="right" width={76} tickFormatter={formatAxisTick} />
+                        <YAxis yAxisId="count" orientation="right" width={76} tickFormatter={(value) => formatAxisTick(value, countAxisScale)} />
                       </>
                     ) : (
-                      <YAxis yAxisId="left" width={76} tickFormatter={hasValueSeries ? formatValueAxisTick : formatAxisTick} />
+                      <YAxis yAxisId="left" width={76} tickFormatter={hasValueSeries ? formatValueAxisTick : (value) => formatAxisTick(value, leftAxisScale)} />
                     )}
                     <Tooltip
                       formatter={(value, name, item) => {
@@ -1239,10 +1269,10 @@ function App() {
                     {useDualMeasureAxes ? (
                       <>
                         <YAxis yAxisId="value" width={76} tickFormatter={formatValueAxisTick} />
-                        <YAxis yAxisId="count" orientation="right" width={76} tickFormatter={formatAxisTick} />
+                        <YAxis yAxisId="count" orientation="right" width={76} tickFormatter={(value) => formatAxisTick(value, countAxisScale)} />
                       </>
                     ) : (
-                      <YAxis yAxisId="left" width={76} tickFormatter={hasValueSeries ? formatValueAxisTick : formatAxisTick} />
+                      <YAxis yAxisId="left" width={76} tickFormatter={hasValueSeries ? formatValueAxisTick : (value) => formatAxisTick(value, leftAxisScale)} />
                     )}
                     <Tooltip
                       formatter={(value, name, item) => {
@@ -1299,10 +1329,10 @@ function App() {
                     {useDualMeasureAxes ? (
                       <>
                         <YAxis yAxisId="value" width={76} tickFormatter={formatValueAxisTick} />
-                        <YAxis yAxisId="count" orientation="right" width={76} tickFormatter={formatAxisTick} />
+                        <YAxis yAxisId="count" orientation="right" width={76} tickFormatter={(value) => formatAxisTick(value, countAxisScale)} />
                       </>
                     ) : (
-                      <YAxis yAxisId="left" width={76} tickFormatter={hasValueSeries ? formatValueAxisTick : formatAxisTick} />
+                      <YAxis yAxisId="left" width={76} tickFormatter={hasValueSeries ? formatValueAxisTick : (value) => formatAxisTick(value, leftAxisScale)} />
                     )}
                     <Tooltip
                       formatter={(value, name, item) => {
