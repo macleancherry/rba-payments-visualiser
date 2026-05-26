@@ -7,7 +7,6 @@ import {
   CardContent,
   Checkbox,
   Chip,
-  CircularProgress,
   FormControl,
   FormControlLabel,
   FormGroup,
@@ -101,6 +100,8 @@ const RANGE_YEARS: Record<Exclude<RangeOption, 'ALL'>, number> = {
   '10Y': 10,
 };
 
+const ZEBRA_SPINNER_SRC = '/zebra-spinner.gif';
+
 function formatValue(value: number, units: string) {
   const unit = units.toLowerCase();
   const isCurrency = unit.includes('$');
@@ -146,6 +147,17 @@ function formatAxisTick(value: number | string, scale = 1) {
   }
 
   return compactNumberFormatter.format(numeric * scale);
+}
+
+function ZebraSpinner({ size = 14, alt = 'Loading' }: { size?: number; alt?: string }) {
+  return (
+    <Box
+      component="img"
+      src={ZEBRA_SPINNER_SRC}
+      alt={alt}
+      sx={{ width: size, height: size, display: 'block' }}
+    />
+  );
 }
 
 function formatValueAxisTick(value: number | string) {
@@ -748,7 +760,7 @@ function App() {
   if (!dataset) {
     return (
       <Box className="loading-wrap">
-        <CircularProgress />
+        <ZebraSpinner size={28} />
         <Typography>Loading composite payments data...</Typography>
       </Box>
     );
@@ -812,7 +824,7 @@ function App() {
               )}
               {trendInsightLoading && (
                 <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  <CircularProgress size={12} />
+                  <ZebraSpinner size={12} />
                   <Typography variant="caption" sx={{ color: 'text.secondary' }}>Generating insight…</Typography>
                 </Box>
               )}
@@ -867,7 +879,7 @@ function App() {
                   )}
                   {volumeInsightLoading && (
                     <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      <CircularProgress size={12} />
+                      <ZebraSpinner size={12} />
                       <Typography variant="caption" sx={{ color: 'text.secondary' }}>Generating insight…</Typography>
                     </Box>
                   )}
@@ -967,7 +979,7 @@ function App() {
                 endAdornment: (
                   <InputAdornment position="end">
                     <IconButton onClick={() => { void handleNlQuery(); }} disabled={nlLoading || !nlQuery.trim()} edge="end">
-                      {nlLoading ? <CircularProgress size={20} /> : <AutoFixHighIcon />}
+                      {nlLoading ? <ZebraSpinner size={20} /> : <AutoFixHighIcon />}
                     </IconButton>
                   </InputAdornment>
                 ),
@@ -1006,7 +1018,7 @@ function App() {
           )}
           {nlAnswerLoading && (
             <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-              <CircularProgress size={14} />
+              <ZebraSpinner size={14} />
               <Typography variant="caption" color="text.secondary">Generating answer…</Typography>
             </Box>
           )}
@@ -1304,7 +1316,7 @@ function App() {
               )}
               {trendInsightLoading && (
                 <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  <CircularProgress size={12} />
+                  <ZebraSpinner size={12} />
                   <Typography variant="caption" sx={{ color: 'text.secondary' }}>Generating insight…</Typography>
                 </Box>
               )}
@@ -1362,7 +1374,7 @@ function App() {
               )}
               {volumeInsightLoading && (
                 <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  <CircularProgress size={12} />
+                  <ZebraSpinner size={12} />
                   <Typography variant="caption" sx={{ color: 'text.secondary' }}>Generating insight…</Typography>
                 </Box>
               )}
