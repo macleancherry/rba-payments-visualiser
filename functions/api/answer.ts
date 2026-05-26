@@ -1,3 +1,5 @@
+import { extractTokenUsage, recordAnswerUsage } from './_usageStats';
+
 interface Env {
   AI?: Ai;
 }
@@ -495,13 +497,17 @@ async function runAnswerModel(ai: Ai, query: string, analytics: ReturnType<typeo
       });
 
       const aiResponse = response as unknown;
+      const tokenUsage = extractTokenUsage(aiResponse);
       const inner = aiResponse && typeof aiResponse === 'object'
         ? (aiResponse as Record<string, unknown>).response
         : aiResponse;
       const answer = typeof inner === 'string' ? inner.trim() : JSON.stringify(inner);
 
       if (answer) {
-        return answer;
+        return {
+          answer,
+          tokenUsage,
+        };
       }
     } catch (error) {
       lastError = error;
@@ -525,10 +531,18 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       units: s.units,
       points: s.points.slice(-36),
     }));
+    const pointCount = normalizedSeries.reduce((acc, s) => acc + s.points.length, 0);
 
     const cacheKey = buildCacheKey(query, body?.datasetVersion, normalizedSeries);
     const cached = answerCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
+      await recordAnswerUsage({
+        cacheSource: 'memory',
+        aiUsed: false,
+        seriesCount: normalizedSeries.length,
+        pointCount,
+        query,
+      });
       return Response.json({ answer: cached.value });
     }
 
@@ -538,6 +552,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         value: edgeCached,
         expiresAt: Date.now() + ANSWER_CACHE_TTL_MS,
       });
+      await recordAnswerUsage({
+        cacheSource: 'edge',
+        aiUsed: false,
+        seriesCount: normalizedSeries.length,
+        pointCount,
+        query,
+      });
       return Response.json({ answer: edgeCached });
     }
 
@@ -546,7 +567,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     const analytics = buildSeriesAnalytics(normalizedSeries);
-    const answer = normalizeAnswerText(await runAnswerModel(context.env.AI, query, analytics));
+    const modelResult = await runAnswerModel(context.env.AI, query, analytics);
+    const answer = normalizeAnswerText(modelResult.answer);
 
     answerCache.set(cacheKey, {
       value: answer,
@@ -554,6 +576,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     });
 
     await setEdgeCache(cacheKey, answer);
+
+    await recordAnswerUsage({
+      cacheSource: 'ai',
+      aiUsed: true,
+      tokenUsage: modelResult.tokenUsage,
+      seriesCount: normalizedSeries.length,
+      pointCount,
+      query,
+    });
 
     return Response.json({ answer });
   } catch (e) {

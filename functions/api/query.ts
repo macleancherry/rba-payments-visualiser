@@ -1,3 +1,5 @@
+import { extractTokenUsage, recordQueryUsage } from './_usageStats';
+
 interface Env {
   AI: Ai;
 }
@@ -292,6 +294,7 @@ Categories:
 - Cheques > Cheques
 - Account-to-Account > Direct Credit | Direct Debit | Direct Entry | NPP | PayTo
 - High Value > RTGS
+- Site Usage > Productivity | Caching | AI Cost
 
 Measure types: value | volume | accounts | other
 
@@ -317,6 +320,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     const cached = queryCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
+      await recordQueryUsage({
+        cacheSource: 'memory',
+        aiUsed: false,
+      });
       return Response.json(cached.value);
     }
 
@@ -325,6 +332,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       queryCache.set(cacheKey, {
         value: edgeCached,
         expiresAt: Date.now() + QUERY_CACHE_TTL_MS,
+      });
+      await recordQueryUsage({
+        cacheSource: 'edge',
+        aiUsed: false,
       });
       return Response.json(edgeCached);
     }
@@ -337,6 +348,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: query },
     ]);
+    const tokenUsage = extractTokenUsage(response);
 
     const aiResponse = response as unknown;
     let parsed: QueryResponse | null = null;
@@ -353,16 +365,31 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       const jsonMatch = (inner as string).trim().match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         const fallback = buildSafeFallbackResponse(query);
+        await recordQueryUsage({
+          cacheSource: 'ai',
+          aiUsed: true,
+          tokenUsage,
+        });
         return Response.json(fallback);
       }
       try {
         parsed = JSON.parse(jsonMatch[0]) as QueryResponse;
       } catch {
         const fallback = buildSafeFallbackResponse(query);
+        await recordQueryUsage({
+          cacheSource: 'ai',
+          aiUsed: true,
+          tokenUsage,
+        });
         return Response.json(fallback);
       }
     } else {
       const fallback = buildSafeFallbackResponse(query);
+      await recordQueryUsage({
+        cacheSource: 'ai',
+        aiUsed: true,
+        tokenUsage,
+      });
       return Response.json(fallback);
     }
 
@@ -372,6 +399,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     });
 
     await setEdgeCache(cacheKey, parsed);
+
+    await recordQueryUsage({
+      cacheSource: 'ai',
+      aiUsed: true,
+      tokenUsage,
+    });
 
     return Response.json(parsed);
   } catch (err) {

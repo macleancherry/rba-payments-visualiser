@@ -80,6 +80,23 @@ type DatasetPayload = {
   series: PaymentSeries[];
 };
 
+type UsageSeriesPayload = {
+  id: string;
+  title: string;
+  units: string;
+  category: string;
+  subcategory: string;
+  measureType: 'other' | 'volume';
+  points: { date: string; value: number }[];
+};
+
+type UsageStatsPayload = {
+  estimatedHoursSaved: number;
+  answerCacheHitRate: number;
+  aiCallsAvoidedByCache: number;
+  usageSeries?: UsageSeriesPayload[];
+};
+
 const SERIES_COLORS = ['#0f4c81', '#11b5a4', '#ff7a59', '#0a2f5a', '#23a6d5', '#f4b400'];
 const MAX_SERIES_CHECKBOX_ROWS = 120;
 const MAX_PLOTTED_SERIES = 8;
@@ -219,6 +236,7 @@ async function parseApiError(res: Response) {
 function App() {
   const [dataset, setDataset] = useState<DatasetPayload | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [usageStats, setUsageStats] = useState<UsageStatsPayload | null>(null);
 
   const [category, setCategory] = useState('All');
   const [subcategory, setSubcategory] = useState('All');
@@ -252,6 +270,56 @@ function App() {
   const [trendInsightLoading, setTrendInsightLoading] = useState(false);
   const [volumeInsight, setVolumeInsight] = useState<string | null>(null);
   const [volumeInsightLoading, setVolumeInsightLoading] = useState(false);
+
+  const mapUsageSeriesToPaymentSeries = (usageSeries: UsageSeriesPayload[]): PaymentSeries[] =>
+    usageSeries.map((item) => ({
+      id: item.id,
+      tableCode: 'SITE_USAGE',
+      tableName: 'Site Usage Metrics',
+      tableUrl: '/api/stats',
+      sheetName: 'usage',
+      title: item.title,
+      frequency: 'daily',
+      units: item.units,
+      category: item.category,
+      subcategory: item.subcategory,
+      measureType: item.measureType,
+      dimensions: {
+        segment: 'site',
+      },
+      points: item.points
+        .filter((point) => point?.date && Number.isFinite(point?.value))
+        .sort((a, b) => a.date.localeCompare(b.date)),
+    }));
+
+  const refreshUsageStats = async () => {
+    try {
+      const response = await fetch('/api/stats', { cache: 'no-store' });
+      if (!response.ok) {
+        return;
+      }
+
+      const stats = await response.json() as UsageStatsPayload;
+      setUsageStats(stats);
+
+      if (Array.isArray(stats.usageSeries) && stats.usageSeries.length) {
+        const mapped = mapUsageSeriesToPaymentSeries(stats.usageSeries);
+        setDataset((current) => {
+          if (!current) {
+            return current;
+          }
+
+          const withoutSiteUsage = current.series.filter((series) => series.category !== 'Site Usage');
+          return {
+            ...current,
+            series: [...withoutSiteUsage, ...mapped],
+          };
+        });
+      }
+    } catch {
+      // Usage stats are optional UI metadata.
+    }
+  };
 
   useEffect(() => {
     try {
@@ -501,12 +569,21 @@ function App() {
 
         const payload = (await response.json()) as DatasetPayload;
         setDataset(payload);
+        await refreshUsageStats();
       } catch (error) {
         setLoadError(error instanceof Error ? error.message : 'Unknown error');
       }
     };
 
     run();
+  }, []);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      void refreshUsageStats();
+    }, 60_000);
+
+    return () => window.clearInterval(id);
   }, []);
 
   const categories = useMemo(() => {
@@ -1002,6 +1079,18 @@ function App() {
           <Chip label={`Latest: ${format(parseISO(dataset.generatedAt), 'dd MMM yyyy')}`} sx={{ backgroundColor: 'rgba(255, 255, 255, 0.15)', color: '#ffffff' }} />
           <Chip label="By Mac Cherry - Head of Payments @ Fat Zebra" sx={{ backgroundColor: 'rgba(255, 255, 255, 0.15)', color: '#ffffff' }} />
         </Stack>
+        {usageStats && (
+          <Typography
+            variant="caption"
+            sx={{ mt: 1, display: 'block', color: 'rgba(255, 255, 255, 0.9)', textAlign: { xs: 'left', md: 'right' } }}
+          >
+            Estimated spreadsheet-navigation time saved: {usageStats.estimatedHoursSaved.toFixed(1)} hours
+            {' · '}
+            Answer cache hit rate: {(usageStats.answerCacheHitRate * 100).toFixed(0)}%
+            {' · '}
+            AI calls avoided by cache: {usageStats.aiCallsAvoidedByCache.toLocaleString()}
+          </Typography>
+        )}
       </Box>
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
