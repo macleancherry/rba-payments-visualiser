@@ -21,8 +21,8 @@ interface QueryResponse {
 const QUERY_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const QUERY_CACHE_TTL_SECONDS = 90 * 24 * 60 * 60;
 const queryCache = new Map<string, { expiresAt: number; value: QueryResponse }>();
-const QUERY_MODELS = ['@cf/meta/llama-3.1-8b-instruct', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'];
-const QUERY_MAX_TOKENS = 80;
+const QUERY_MODELS = ['@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/meta/llama-3.1-8b-instruct'];
+const QUERY_MAX_TOKENS = 200;
 
 const MONTHS: Record<string, string> = {
   january: '01', jan: '01',
@@ -49,7 +49,7 @@ function normalizeDatasetVersion(version?: string) {
 }
 
 function buildCacheKey(query: string, datasetVersion?: string) {
-  return `query:v1:${normalizeDatasetVersion(datasetVersion)}:${normalizeQuery(query)}`;
+  return `query:v2:${normalizeDatasetVersion(datasetVersion)}:${normalizeQuery(query)}`;
 }
 
 function buildEdgeRequest(cacheKey: string) {
@@ -224,11 +224,7 @@ function extractWithRules(query: string): QueryResponse | null {
 }
 
 function buildSafeFallbackResponse(query: string): QueryResponse {
-  const ruleBased = extractWithRules(query);
-  if (ruleBased) {
-    return ruleBased;
-  }
-
+  void query;
   return {
     category: null,
     subcategory: null,
@@ -331,16 +327,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         expiresAt: Date.now() + QUERY_CACHE_TTL_MS,
       });
       return Response.json(edgeCached);
-    }
-
-    const ruleBased = extractWithRules(query);
-    if (ruleBased) {
-      queryCache.set(cacheKey, {
-        value: ruleBased,
-        expiresAt: Date.now() + QUERY_CACHE_TTL_MS,
-      });
-      await setEdgeCache(cacheKey, ruleBased);
-      return Response.json(ruleBased);
     }
 
     if (!context.env.AI) {

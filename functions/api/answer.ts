@@ -18,7 +18,7 @@ const ANSWER_CACHE_TTL_MS = 2 * 60 * 60 * 1000;
 const ANSWER_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60;
 const answerCache = new Map<string, { expiresAt: number; value: string }>();
 const ANSWER_MODELS = ['@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/meta/llama-3.1-8b-instruct'];
-const ANSWER_MAX_TOKENS = 160;
+const ANSWER_MAX_TOKENS = 320;
 
 function normalizeQuery(query: string) {
   return query.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -41,7 +41,7 @@ function buildSeriesSignature(series: SeriesSummary[]) {
   return series
     .map((s) => {
       const pointsSig = s.points
-        .slice(-12)
+        .slice(-24)
         .map((p) => `${p.date}:${p.value}`)
         .join('|');
       return `${s.title}~${s.units}~${pointsSig}`;
@@ -52,7 +52,7 @@ function buildSeriesSignature(series: SeriesSummary[]) {
 
 function buildCacheKey(query: string, datasetVersion: string | undefined, series: SeriesSummary[]) {
   const payloadSig = `${normalizeQuery(query)}::${buildSeriesSignature(series)}`;
-  return `answer:v4:${normalizeDatasetVersion(datasetVersion)}:${hashString(payloadSig)}`;
+  return `answer:v5:${normalizeDatasetVersion(datasetVersion)}:${hashString(payloadSig)}`;
 }
 
 function buildEdgeRequest(cacheKey: string) {
@@ -429,7 +429,7 @@ Rules:
 - Plain text only.`;
 
 function buildSeriesAnalytics(series: SeriesSummary[]) {
-  return series.slice(0, 3).map((s) => {
+  return series.slice(0, 10).map((s) => {
     const pts = s.points.filter((p) => Number.isFinite(p.value));
     const latest = pts[pts.length - 1] ?? null;
     const previous = pts[pts.length - 2] ?? null;
@@ -452,7 +452,7 @@ function buildSeriesAnalytics(series: SeriesSummary[]) {
       highestPoint: pts.length ? pts.reduce((a, b) => (b.value > a.value ? b : a)) : null,
       lowestPoint: pts.length ? pts.reduce((a, b) => (b.value < a.value ? b : a)) : null,
       recentChangesPct: changes.slice(-3).map((c) => c.pct),
-      recentPoints: pts.slice(-12),
+      recentPoints: pts.slice(-24),
     };
   });
 }
@@ -500,7 +500,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const normalizedSeries = series.map((s) => ({
       title: s.title,
       units: s.units,
-      points: s.points.slice(-12),
+      points: s.points.slice(-36),
     }));
 
     const cacheKey = buildCacheKey(query, body?.datasetVersion, normalizedSeries);
@@ -518,19 +518,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return Response.json({ answer: edgeCached });
     }
 
-    const deterministicAnswer = buildDeterministicAnswer(query, normalizedSeries);
-    let answer = deterministicAnswer;
-    if (context.env.AI && !shouldPreferDeterministic(query)) {
-      try {
-        const analytics = buildSeriesAnalytics(normalizedSeries);
-        const modelAnswer = await runAnswerModel(context.env.AI, query, analytics);
-        if (modelAnswer) {
-          answer = modelAnswer;
-        }
-      } catch {
-        // Fallback to deterministic answer when model is unavailable/quota-limited.
-      }
+    if (!context.env.AI) {
+      return Response.json({ error: 'AI binding not available', code: 'AI_BINDING_MISSING' }, { status: 503 });
     }
+
+    const analytics = buildSeriesAnalytics(normalizedSeries);
+    const answer = await runAnswerModel(context.env.AI, query, analytics);
 
     answerCache.set(cacheKey, {
       value: answer,
