@@ -19,6 +19,7 @@ const ANSWER_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60;
 const answerCache = new Map<string, { expiresAt: number; value: string }>();
 const ANSWER_MODELS = ['@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/meta/llama-3.1-8b-instruct'];
 const ANSWER_MAX_TOKENS = 320;
+const absoluteNumberFormatter = new Intl.NumberFormat('en-AU', { maximumFractionDigits: 0 });
 
 function normalizeQuery(query: string) {
   return query.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -52,7 +53,7 @@ function buildSeriesSignature(series: SeriesSummary[]) {
 
 function buildCacheKey(query: string, datasetVersion: string | undefined, series: SeriesSummary[]) {
   const payloadSig = `${normalizeQuery(query)}::${buildSeriesSignature(series)}`;
-  return `answer:v5:${normalizeDatasetVersion(datasetVersion)}:${hashString(payloadSig)}`;
+  return `answer:v6:${normalizeDatasetVersion(datasetVersion)}:${hashString(payloadSig)}`;
 }
 
 function buildEdgeRequest(cacheKey: string) {
@@ -82,6 +83,25 @@ async function setEdgeCache(cacheKey: string, answer: string) {
   });
 
   await caches.default.put(buildEdgeRequest(cacheKey), response);
+}
+
+function normalizeAnswerText(answer: string) {
+  let out = answer.trim();
+
+  // Remove common wrapping characters from model output.
+  out = out.replace(/^["'`\s]+|["'`\s]+$/g, '');
+
+  // Convert storage notation to absolute numbers: 617.692 ('000) -> 617,692.
+  out = out.replace(/(\d[\d,]*(?:\.\d+)?)\s*\('000'\)/gi, (match, rawValue) => {
+    const numeric = Number(String(rawValue).replace(/,/g, ''));
+    if (!Number.isFinite(numeric)) {
+      return match;
+    }
+    return absoluteNumberFormatter.format(Math.round(numeric * 1_000));
+  });
+
+  out = out.replace(/\s{2,}/g, ' ');
+  return out;
 }
 
 function formatPeriod(date: string) {
@@ -425,7 +445,10 @@ Rules:
 - Prefer a clear yes/no first when the question implies it.
 - Include specific numbers and dates.
 - If asked for highest/lowest month, explicitly name the month and value.
-- 2-4 sentences maximum.
+- Data may be stored in technical units like "'000" or "$ million"; convert these to human-readable absolute numbers.
+- Never print raw storage notation like "('000)" in the final answer.
+- Use thousands separators for large numbers (e.g., 617,692,000).
+- Keep straightforward answers short (1-2 sentences). Max 4 sentences.
 - Plain text only.`;
 
 function buildSeriesAnalytics(series: SeriesSummary[]) {
@@ -523,7 +546,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     const analytics = buildSeriesAnalytics(normalizedSeries);
-    const answer = await runAnswerModel(context.env.AI, query, analytics);
+    const answer = normalizeAnswerText(await runAnswerModel(context.env.AI, query, analytics));
 
     answerCache.set(cacheKey, {
       value: answer,
