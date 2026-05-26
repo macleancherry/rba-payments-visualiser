@@ -20,6 +20,7 @@ export interface UsageStats {
   queriesCompletionTokens: number;
   estimatedManualSecondsSaved: number;
   daily: Record<string, DailyUsageBucket>;
+  backfillVersion?: string;
   updatedAt: string;
 }
 
@@ -61,6 +62,50 @@ export interface AnswerUsageEvent {
 }
 
 const STATS_CACHE_KEY = 'usage-stats:v1';
+const HISTORICAL_BACKFILL_VERSION = '2026-05-token-chart-v1';
+
+// Rough historical backfill from observed Cloudflare token usage chart (pre-telemetry period).
+// Total token budget seeded here is ~14,010 to align with the shared dashboard snapshot.
+const HISTORICAL_BACKFILL = {
+  answersTotal: 10,
+  answersAiCalls: 10,
+  answersPromptTokens: 10_950,
+  answersCompletionTokens: 1_240,
+  queriesTotal: 3,
+  queriesAiCalls: 3,
+  queriesPromptTokens: 1_450,
+  queriesCompletionTokens: 370,
+  estimatedManualSecondsSaved: 7_800,
+  daily: {
+    '2026-05-21': {
+      answersTotal: 4,
+      answersCacheHits: 0,
+      queriesTotal: 1,
+      queriesCacheHits: 0,
+      aiCalls: 5,
+      aiCallsAvoidedByCache: 0,
+      estimatedManualSecondsSaved: 2_600,
+    },
+    '2026-05-22': {
+      answersTotal: 4,
+      answersCacheHits: 0,
+      queriesTotal: 1,
+      queriesCacheHits: 0,
+      aiCalls: 5,
+      aiCallsAvoidedByCache: 0,
+      estimatedManualSecondsSaved: 2_800,
+    },
+    '2026-05-23': {
+      answersTotal: 2,
+      answersCacheHits: 0,
+      queriesTotal: 1,
+      queriesCacheHits: 0,
+      aiCalls: 3,
+      aiCallsAvoidedByCache: 0,
+      estimatedManualSecondsSaved: 2_400,
+    },
+  } as Record<string, DailyUsageBucket>,
+};
 
 function buildStatsRequest() {
   return new Request(`https://nlp-cache.local/stats/${encodeURIComponent(STATS_CACHE_KEY)}`);
@@ -123,17 +168,60 @@ function mergeWithDefaults(value: Partial<UsageStats> | null | undefined): Usage
   };
 }
 
+function applyHistoricalBackfill(stats: UsageStats) {
+  if (stats.backfillVersion === HISTORICAL_BACKFILL_VERSION) {
+    return false;
+  }
+
+  stats.answersTotal += HISTORICAL_BACKFILL.answersTotal;
+  stats.answersAiCalls += HISTORICAL_BACKFILL.answersAiCalls;
+  stats.answersPromptTokens += HISTORICAL_BACKFILL.answersPromptTokens;
+  stats.answersCompletionTokens += HISTORICAL_BACKFILL.answersCompletionTokens;
+  stats.queriesTotal += HISTORICAL_BACKFILL.queriesTotal;
+  stats.queriesAiCalls += HISTORICAL_BACKFILL.queriesAiCalls;
+  stats.queriesPromptTokens += HISTORICAL_BACKFILL.queriesPromptTokens;
+  stats.queriesCompletionTokens += HISTORICAL_BACKFILL.queriesCompletionTokens;
+  stats.estimatedManualSecondsSaved += HISTORICAL_BACKFILL.estimatedManualSecondsSaved;
+
+  for (const [day, bucket] of Object.entries(HISTORICAL_BACKFILL.daily)) {
+    const current = stats.daily[day] ?? defaultDailyBucket();
+    stats.daily[day] = {
+      answersTotal: current.answersTotal + bucket.answersTotal,
+      answersCacheHits: current.answersCacheHits + bucket.answersCacheHits,
+      queriesTotal: current.queriesTotal + bucket.queriesTotal,
+      queriesCacheHits: current.queriesCacheHits + bucket.queriesCacheHits,
+      aiCalls: current.aiCalls + bucket.aiCalls,
+      aiCallsAvoidedByCache: current.aiCallsAvoidedByCache + bucket.aiCallsAvoidedByCache,
+      estimatedManualSecondsSaved: current.estimatedManualSecondsSaved + bucket.estimatedManualSecondsSaved,
+    };
+  }
+
+  stats.backfillVersion = HISTORICAL_BACKFILL_VERSION;
+  stats.updatedAt = nowIso();
+  return true;
+}
+
 export async function getUsageStats(): Promise<UsageStats> {
   const cached = await caches.default.match(buildStatsRequest());
   if (!cached) {
-    return defaultStats();
+    const fresh = defaultStats();
+    applyHistoricalBackfill(fresh);
+    await setUsageStats(fresh);
+    return fresh;
   }
 
   try {
     const parsed = await cached.json<Partial<UsageStats>>();
-    return mergeWithDefaults(parsed);
+    const merged = mergeWithDefaults(parsed);
+    if (applyHistoricalBackfill(merged)) {
+      await setUsageStats(merged);
+    }
+    return merged;
   } catch {
-    return defaultStats();
+    const fresh = defaultStats();
+    applyHistoricalBackfill(fresh);
+    await setUsageStats(fresh);
+    return fresh;
   }
 }
 
