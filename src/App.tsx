@@ -320,14 +320,18 @@ function App() {
       });
       if (!res.ok) throw new Error(await parseApiError(res));
       const data = await res.json() as {
-        category?: string; subcategory?: string; measureType?: string;
-        timeRange?: string; dateFrom?: string; dateTo?: string;
-        keywords?: string; explanation: string;
+        category?: string | null; subcategory?: string | null; measureType?: string | null;
+        timeRange?: string | null; dateFrom?: string | null; dateTo?: string | null;
+        keywords?: string | null; explanation: string;
       };
 
-      const newCategory = data.category ?? 'All';
-      const newSubcategory = data.subcategory ?? 'All';
-      const newMeasureType = (data.measureType ?? 'All') as 'All' | MeasureType;
+      const parsedCategory = typeof data.category === 'string' ? data.category.trim() : '';
+      const parsedSubcategory = typeof data.subcategory === 'string' ? data.subcategory.trim() : '';
+      const parsedMeasureType = typeof data.measureType === 'string' ? data.measureType.trim() : '';
+
+      const newCategory = parsedCategory || 'All';
+      const newSubcategory = parsedSubcategory || 'All';
+      const newMeasureType = (parsedMeasureType || 'All') as 'All' | MeasureType;
       const requestedKeywords = data.keywords?.trim() ?? '';
       const newFrom = (data.dateFrom || data.dateTo) ? (data.dateFrom ?? null) : null;
       const newTo = (data.dateFrom || data.dateTo) ? (data.dateTo ?? null) : null;
@@ -335,9 +339,14 @@ function App() {
       const matchesWithoutKeywords = getSeriesMatches(newCategory, newSubcategory, newMeasureType, '');
       const effectiveKeywords = requestedKeywords && matchesWithKeywords.length > 0 ? requestedKeywords : '';
 
-      if (data.category) setCategory(newCategory);
-      if (data.subcategory) setSubcategory(newSubcategory);
-      if (data.measureType) setMeasureType(newMeasureType);
+      if (parsedCategory || parsedSubcategory) {
+        setCategory(newCategory);
+        setSubcategory(newSubcategory);
+      }
+
+      if (parsedMeasureType) {
+        setMeasureType(newMeasureType);
+      }
       if (newFrom || newTo) {
         setCustomFrom(newFrom);
         setCustomTo(newTo);
