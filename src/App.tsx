@@ -38,7 +38,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { format, parseISO, subYears } from 'date-fns';
+import { differenceInCalendarDays, format, parseISO, subYears } from 'date-fns';
 
 type MeasureType = 'value' | 'volume' | 'accounts' | 'other';
 type RangeOption = '2Y' | '5Y' | '10Y' | 'ALL';
@@ -171,6 +171,59 @@ function formatAxisTick(value: number | string, scale = 1) {
   }
 
   return compactNumberFormatter.format(numeric * scale);
+}
+
+type TimeLabelGranularity = 'day' | 'week' | 'month';
+
+function inferTimeLabelGranularity(sortedDates: string[]): TimeLabelGranularity {
+  if (sortedDates.length < 2) {
+    return 'month';
+  }
+
+  const first = parseISO(sortedDates[0]);
+  const last = parseISO(sortedDates[sortedDates.length - 1]);
+  const spanDays = Math.max(0, differenceInCalendarDays(last, first));
+
+  let minStepDays = Number.POSITIVE_INFINITY;
+  for (let i = 1; i < sortedDates.length; i += 1) {
+    const prev = parseISO(sortedDates[i - 1]);
+    const curr = parseISO(sortedDates[i]);
+    const step = Math.abs(differenceInCalendarDays(curr, prev));
+    if (step > 0 && step < minStepDays) {
+      minStepDays = step;
+    }
+  }
+
+  if (!Number.isFinite(minStepDays)) {
+    minStepDays = 30;
+  }
+
+  if (minStepDays <= 2) {
+    if (spanDays <= 120) {
+      return 'day';
+    }
+    if (spanDays <= 730) {
+      return 'week';
+    }
+    return 'month';
+  }
+
+  if (minStepDays <= 10) {
+    return spanDays <= 730 ? 'week' : 'month';
+  }
+
+  return 'month';
+}
+
+function formatTimelineLabel(date: string, granularity: TimeLabelGranularity) {
+  const parsed = parseISO(date);
+  if (granularity === 'day') {
+    return format(parsed, 'd MMM');
+  }
+  if (granularity === 'week') {
+    return format(parsed, "'Wk' II yyyy");
+  }
+  return format(parsed, 'MMM yyyy');
 }
 
 function ZebraSpinner({ size = 14, alt = 'Loading' }: { size?: number; alt?: string }) {
@@ -771,12 +824,16 @@ function App() {
       minDate = format(subYears(new Date(), RANGE_YEARS[timeRange as Exclude<RangeOption, 'ALL'>]), 'yyyy-MM-01');
     }
 
-    return sortedDates
-      .filter((date) => (!minDate || date >= minDate) && (!maxDate || date <= maxDate))
+    const visibleDates = sortedDates
+      .filter((date) => (!minDate || date >= minDate) && (!maxDate || date <= maxDate));
+
+    const labelGranularity = inferTimeLabelGranularity(visibleDates);
+
+    return visibleDates
       .map((date) => {
         const row: Record<string, number | string | null> = {
           date,
-          label: format(parseISO(date), 'MMM yyyy'),
+          label: formatTimelineLabel(date, labelGranularity),
         };
 
         plottedSeries.forEach((series) => {
