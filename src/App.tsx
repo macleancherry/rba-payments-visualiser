@@ -1135,19 +1135,13 @@ function App() {
           <Chip label={`${dataset.series.length} data series`} sx={{ backgroundColor: 'rgba(255, 255, 255, 0.15)', color: '#ffffff' }} />
           <Chip label={`Latest: ${format(parseISO(dataset.generatedAt), 'dd MMM yyyy')}`} sx={{ backgroundColor: 'rgba(255, 255, 255, 0.15)', color: '#ffffff' }} />
           <Chip label="By Mac Cherry - Head of Payments @ Fat Zebra" sx={{ backgroundColor: 'rgba(255, 255, 255, 0.15)', color: '#ffffff' }} />
+          {usageStats && (
+            <Chip
+              label={`Estimated analyst time saved: ${usageStats.estimatedHoursSaved.toFixed(1)} hours`}
+              sx={{ backgroundColor: 'rgba(255, 255, 255, 0.15)', color: '#ffffff' }}
+            />
+          )}
         </Stack>
-        {usageStats && (
-          <Typography
-            variant="caption"
-            sx={{ mt: 1, display: 'block', color: 'rgba(255, 255, 255, 0.9)', textAlign: { xs: 'left', md: 'right' } }}
-          >
-            Estimated spreadsheet-navigation time saved: {usageStats.estimatedHoursSaved.toFixed(1)} hours
-            {' · '}
-            Answer cache hit rate: {(usageStats.answerCacheHitRate * 100).toFixed(0)}%
-            {' · '}
-            AI calls avoided by cache: {usageStats.aiCallsAvoidedByCache.toLocaleString()}
-          </Typography>
-        )}
       </Box>
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
