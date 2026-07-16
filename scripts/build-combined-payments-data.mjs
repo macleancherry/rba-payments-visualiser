@@ -244,8 +244,28 @@ async function buildDeviceSeries() {
   });
 }
 
+const FRAUD_PERIOD_MONTHS = {
+  jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+  jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+};
+
+// AusPayNet fraud-statistics headings give a "Mon YY - Mon YY" range (e.g.
+// "Jul 24 - Jun 25" or "Jan 24 - Dec 24") - two-digit years, not four. Parse the
+// last month/year pair (the period end) directly instead of inferring from a
+// bare 4-digit year, which these headings no longer contain.
 function parseFraudPeriod(titleText) {
   const text = cleanText(titleText);
+  const matches = [...text.matchAll(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{2}|\d{4})\b/gi)];
+  if (matches.length) {
+    const [, monthRaw, yearRaw] = matches[matches.length - 1];
+    const month = FRAUD_PERIOD_MONTHS[monthRaw.slice(0, 3).toLowerCase()];
+    const year = yearRaw.length === 2 ? `20${yearRaw}` : yearRaw;
+    if (month) {
+      return `${year}-${month}-01`;
+    }
+  }
+
+  // Fallback for older/bare "2022"-style headings with no month.
   const years = [...text.matchAll(/\b(20\d{2})\b/g)].map((match) => Number(match[1]));
   const finalYear = years[years.length - 1];
   if (!finalYear) return null;
@@ -259,6 +279,18 @@ function parseFraudPeriod(titleText) {
 
 function metricKey(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+}
+
+// cheerio's .text() sometimes drops the space where the source markup had a
+// line break between words (e.g. "...Card Fraud<br>Perpetrated..." renders as
+// "FraudPerpetrated"); compare with all whitespace stripped so heading matches
+// aren't broken by that.
+function squash(text) {
+  return text.replace(/\s+/g, '');
+}
+
+function headingMatches(heading, expected) {
+  return squash(heading).includes(squash(expected));
 }
 
 async function buildFraudSeries() {
@@ -286,12 +318,27 @@ async function buildFraudSeries() {
 
     const pageText = cleanText($('body').text());
 
-    const pushSummaryMetric = (key, title, subcategory, regex, options = {}) => {
-      const match = pageText.match(regex);
-      if (!match) return;
-      const raw = match[1];
-      const value = options.million ? parseMillionAmount(raw) : parseDollarAmount(raw);
-      if (value === null) return;
+    // AusPayNet's narrative summary sentences reorder and reword every reporting
+    // period (e.g. "X fraud declined N% from $A million (in FY24) to $B million" one
+    // year, "remained stable ... to $B million" the next). Rather than pin an exact
+    // sentence shape, locate the topic phrase and take the LAST dollar amount
+    // mentioned shortly after it - that's consistently the current-period figure.
+    const pushSummaryMetric = (key, title, subcategory, phraseRegex, windowChars = 220) => {
+      const phraseMatch = pageText.match(phraseRegex);
+      if (!phraseMatch || phraseMatch.index === undefined) return;
+
+      const start = phraseMatch.index + phraseMatch[0].length;
+      const windowText = pageText.slice(start, start + windowChars);
+      // Require an explicit million/billion unit on the match - an un-unit'd dollar
+      // figure nearby (e.g. "77.6 cents per $1,000 spent") is a different metric, not
+      // this one, and must not be mistaken for the "last" figure in the window.
+      const dollarMatches = [...windowText.matchAll(/\$([0-9][0-9,.]*)\s*(million|billion)\b/gi)];
+      if (!dollarMatches.length) return;
+
+      const [, raw, unit] = dollarMatches[dollarMatches.length - 1];
+      const numeric = parseNumber(raw);
+      if (numeric === null) return;
+      const value = /billion/i.test(unit) ? numeric * 1_000_000_000 : numeric * 1_000_000;
 
       upsertSeries(seriesMap, key, {
         id: key,
@@ -301,7 +348,7 @@ async function buildFraudSeries() {
         sheetName: titleText,
         title,
         frequency: 'Annual',
-        units: options.million ? '$' : '$',
+        units: '$',
         category: 'Fraud',
         subcategory,
         measureType: 'value',
@@ -313,48 +360,35 @@ async function buildFraudSeries() {
       'fraud-total-card-value',
       'AusPayNet Fraud: Total card fraud value',
       'Cards',
-      /card fraud on Australian-issued cards[^$]*?\$([0-9,.]+)\s+million/i,
-      { million: true },
+      /(?:card fraud on Australian-issued cards|fraud on payment cards)/i,
     );
 
     pushSummaryMetric(
       'fraud-domestic-cnp-value',
       'AusPayNet Fraud: Domestic CNP value',
       'Cards',
-      /domestic CNP fraud[^$]*?\$([0-9,.]+)\s+million/i,
-      { million: true },
+      /(?:domestic CNP fraud|CNP\)?\s*fraud on Australian-issued cards used domestically)/i,
     );
 
     pushSummaryMetric(
       'fraud-overseas-cnp-value',
       'AusPayNet Fraud: Overseas CNP value',
       'Cards',
-      /overseas CNP fraud[^$]*?\$([0-9,.]+)\s+million/i,
-      { million: true },
+      /(?:overseas CNP fraud|CNP\)?\s*fraud on Australian-issued cards used online with overseas merchants)/i,
     );
 
     pushSummaryMetric(
       'fraud-lost-stolen-value',
       'AusPayNet Fraud: Lost and stolen value',
       'Cards',
-      /lost and stolen fraud[^$]*?\$([0-9,.]+)\s+million/i,
-      { million: true },
+      /lost and stolen fraud/i,
     );
 
     pushSummaryMetric(
       'fraud-counterfeit-value',
       'AusPayNet Fraud: Counterfeit/skimming value',
       'Cards',
-      /counterfeit\/skimming fraud[^$]*?\$([0-9,.]+)\s+million/i,
-      { million: true },
-    );
-
-    pushSummaryMetric(
-      'fraud-cheque-value',
-      'AusPayNet Fraud: Cheque fraud value',
-      'Cheques',
-      /cheque fraud[^$]*?\$([0-9,.]+)\s+million/i,
-      { million: true },
+      /counterfeit\/skimming fraud/i,
     );
 
     $('h3').each((_, headingElement) => {
@@ -369,9 +403,13 @@ async function buildFraudSeries() {
           break;
         }
 
-        const nestedTable = cursor.find('table').first();
-        if (nestedTable.length) {
-          table = nestedTable;
+        // Each section wraps a tiny header-only "stats-header" table AND the real
+        // data table together in one container - take whichever nested table has
+        // the most rows rather than just the first (the header stub is always #1).
+        const nestedTables = cursor.find('table').toArray().map((el) => $(el));
+        if (nestedTables.length) {
+          table = nestedTables.reduce((best, candidate) =>
+            candidate.find('tr').length > best.find('tr').length ? candidate : best);
           break;
         }
 
@@ -397,7 +435,7 @@ async function buildFraudSeries() {
 
       if (!heading || rows.length < 2) return;
 
-      if (heading.includes('Fraud Perpetrated on Australian Cheques and Cards')) {
+      if (headingMatches(heading, 'Fraud Perpetrated on Australian Cheques and Cards')) {
         for (const row of rows.slice(2)) {
           const label = row[0];
           if (!label) continue;
@@ -449,7 +487,7 @@ async function buildFraudSeries() {
       const totalRow = rows.find((row) => row[0] === 'Total' || row[0] === 'Total Debit Card Fraud');
       if (!totalRow) return;
 
-      if (heading.includes('Cheque Fraud Perpetrated in Australia')) {
+      if (headingMatches(heading, 'Cheque Fraud Perpetrated in Australia')) {
         const actualValue = parseDollarAmount(totalRow[2]);
         const exposureValue = parseDollarAmount(totalRow[4]);
 
@@ -490,7 +528,7 @@ async function buildFraudSeries() {
         }
       }
 
-      if (heading.includes('Proprietary Debit Card Fraud Perpetrated in Australia')) {
+      if (headingMatches(heading, 'Proprietary Debit Card Fraud Perpetrated in Australia')) {
         const totalValue = parseDollarAmount(totalRow[2]);
         if (totalValue !== null) {
           const key = 'fraud-debit-total-value';
@@ -511,7 +549,7 @@ async function buildFraudSeries() {
         }
       }
 
-      if (heading.includes('Scheme Credit, Debit and Charge Card Fraud Perpetrated in Australia and Overseas on Australia-issued Cards')) {
+      if (headingMatches(heading, 'Scheme Credit, Debit and Charge Card Fraud Perpetrated in Australia and Overseas on Australia-issued Cards')) {
         const totalValue = parseDollarAmount(totalRow[6]);
         const domesticValue = parseDollarAmount(totalRow[2]);
         const overseasValue = parseDollarAmount(totalRow[4]);
@@ -571,7 +609,7 @@ async function buildFraudSeries() {
         }
       }
 
-      if (heading.includes('Fraud Perpetrated in Australia on Cards issued Overseas')) {
+      if (headingMatches(heading, 'Fraud Perpetrated in Australia on Cards issued Overseas')) {
         const totalValue = parseDollarAmount(totalRow[2]);
         if (totalValue !== null) {
           const key = 'fraud-overseas-cards-total-value';
