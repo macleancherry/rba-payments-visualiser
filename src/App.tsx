@@ -381,6 +381,12 @@ function App() {
   const [nlResult, setNlResult] = useState<{ explanation: string } | null>(null);
   const [nlError, setNlError] = useState<string | null>(null);
   const nlInputRef = useRef<HTMLInputElement>(null);
+  // Tells the filteredSeries-driven auto-select effect to leave selectedSeries alone
+  // for its next firing, because handleNlQuery just set it explicitly to the exact
+  // series the NL answer is based on - the effect's usual "intersect with the current
+  // filter dropdowns" behavior would otherwise silently drop any of them that fall
+  // outside category/subcategory/measureType/keyword-search state set from the same query.
+  const skipSelectionAutoResetRef = useRef(false);
   const [customFrom, setCustomFrom] = useState<string | null>(null);
   const [customTo, setCustomTo] = useState<string | null>(null);
   const [nlAnswer, setNlAnswer] = useState<string | null>(null);
@@ -652,11 +658,6 @@ function App() {
       const matchesWithoutKeywords = getSeriesMatches(newCategory, newSubcategory, newMeasureType, '');
       const effectiveKeywords = requestedKeywords && matchesWithKeywords.length > 0 ? requestedKeywords : '';
 
-      if (parsedCategory || parsedSubcategory) {
-        setCategory(newCategory);
-        setSubcategory(newSubcategory);
-      }
-
       if (parsedMeasureType) {
         setMeasureType(newMeasureType);
       }
@@ -689,6 +690,23 @@ function App() {
           ? rankedCandidates
           : (aggregateFallback.length ? aggregateFallback : fallbackCandidates)
         ).slice(0, 10);
+
+        // Set the category/subcategory dropdowns FROM the series actually being shown
+        // (not the classifier's raw guess) - otherwise a comparison question spanning
+        // two subcategories (e.g. "NPP vs direct entry") gets its dashboard filter
+        // narrowed to just one of them, silently hiding the other from every chart
+        // even though the answer text (built from the same topSeries) discusses both.
+        if (topSeries.length) {
+          const topCategories = new Set(topSeries.map((s) => s.category));
+          const topSubcategories = new Set(topSeries.map((s) => s.subcategory));
+          setCategory(topCategories.size === 1 ? [...topCategories][0] : 'All');
+          setSubcategory(topSubcategories.size === 1 ? [...topSubcategories][0] : 'All');
+          skipSelectionAutoResetRef.current = true;
+          setSelectedSeries(topSeries);
+        } else if (parsedCategory || parsedSubcategory) {
+          setCategory(newCategory);
+          setSubcategory(newSubcategory);
+        }
 
         const dateMin = newFrom ? `${newFrom}-01` : null;
         const dateMax = newTo ? `${newTo}-31` : null;
@@ -835,6 +853,11 @@ function App() {
   }, [baseSeries, dimSegment, dimCardType, dimPrepaidType, dimLocation, dimAcquirer, dimMethod, dimInstrument]);
 
   useEffect(() => {
+    if (skipSelectionAutoResetRef.current) {
+      skipSelectionAutoResetRef.current = false;
+      return;
+    }
+
     if (!filteredSeries.length) {
       setSelectedSeries([]);
       return;
