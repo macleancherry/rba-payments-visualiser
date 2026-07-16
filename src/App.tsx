@@ -7,6 +7,7 @@ import {
   CardContent,
   Checkbox,
   Chip,
+  Collapse,
   FormControl,
   FormControlLabel,
   FormGroup,
@@ -20,8 +21,11 @@ import {
   Switch,
   TextField,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import {
@@ -97,7 +101,8 @@ type UsageStatsPayload = {
   usageSeries?: UsageSeriesPayload[];
 };
 
-const SERIES_COLORS = ['#0f4c81', '#11b5a4', '#ff7a59', '#0a2f5a', '#23a6d5', '#f4b400'];
+// Validated categorical palette (CVD-safe adjacent ordering) - see dataviz skill palette.md
+const SERIES_COLORS = ['#2a78d6', '#008300', '#e87ba4', '#eda100', '#1baf7a', '#eb6834', '#4a3aa7', '#e34948'];
 const MAX_SERIES_CHECKBOX_ROWS = 120;
 const MAX_PLOTTED_SERIES = 8;
 const MAX_RECENT_QUERIES = 3;
@@ -287,6 +292,10 @@ async function parseApiError(res: Response) {
 }
 
 function App() {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+
   const [dataset, setDataset] = useState<DatasetPayload | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [usageStats, setUsageStats] = useState<UsageStatsPayload | null>(null);
@@ -1243,10 +1252,37 @@ function App() {
         <Grid size={{ xs: 12, md: 3 }}>
           <Card className="filter-card" sx={{ position: 'sticky', top: 16 }}>
             <CardContent>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
-                <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Filters</Typography>
-                <Button size="small" onClick={handleReset} color="inherit" sx={{ textTransform: 'none', color: 'text.secondary' }}>Reset all</Button>
+              <Box
+                sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5, cursor: { xs: 'pointer', md: 'default' } }}
+                onClick={() => isMobile && setMobileFiltersOpen((open) => !open)}
+              >
+                <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                  Filters
+                  {isMobile && !mobileFiltersOpen && selectedSeries.length !== dataset.series.length && (
+                    <Typography component="span" variant="caption" sx={{ color: 'text.secondary', fontWeight: 400, ml: 1 }}>
+                      ({selectedSeries.length} series selected)
+                    </Typography>
+                  )}
+                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Button
+                    size="small"
+                    onClick={(e) => { e.stopPropagation(); handleReset(); }}
+                    color="inherit"
+                    sx={{ textTransform: 'none', color: 'text.secondary' }}
+                  >
+                    Reset all
+                  </Button>
+                  <IconButton
+                    size="small"
+                    aria-label={mobileFiltersOpen ? 'Collapse filters' : 'Expand filters'}
+                    sx={{ display: { xs: 'inline-flex', md: 'none' }, transform: mobileFiltersOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}
+                  >
+                    <ExpandMoreIcon />
+                  </IconButton>
+                </Box>
               </Box>
+              <Collapse in={!isMobile || mobileFiltersOpen}>
               <Stack spacing={2}>
                 <FormControl fullWidth>
                   <InputLabel>Category</InputLabel>
@@ -1454,6 +1490,7 @@ function App() {
                   )}
                 </Box>
               </Stack>
+              </Collapse>
             </CardContent>
           </Card>
         </Grid>
