@@ -786,6 +786,34 @@ function App() {
 
   const useDualMeasureAxes = hasValueSeries && hasNonValueSeries;
 
+  // Stable per-series color, independent of which chart/subset a series appears in.
+  const seriesColorIndex = useMemo(
+    () => new Map(plottedSeries.map((series, index) => [series.id, index])),
+    [plottedSeries],
+  );
+
+  const colorForSeries = (series: PaymentSeries) =>
+    SERIES_COLORS[(seriesColorIndex.get(series.id) ?? 0) % SERIES_COLORS.length];
+
+  // A single chart never mixes measures on two y-axes (dollars vs. counts aren't
+  // comparable on shared gridlines) - split into same-measure groups instead.
+  const valuePlottedSeries = useMemo(
+    () => plottedSeries.filter((series) => series.measureType === 'value'),
+    [plottedSeries],
+  );
+
+  const countPlottedSeries = useMemo(
+    () => plottedSeries.filter((series) => series.measureType !== 'value'),
+    [plottedSeries],
+  );
+
+  const areaChartSeries = useMemo(
+    () => (valuePlottedSeries.length ? valuePlottedSeries : countPlottedSeries).slice(0, 2),
+    [valuePlottedSeries, countPlottedSeries],
+  );
+
+  const areaChartIsValueMeasure = valuePlottedSeries.length > 0;
+
   const inferAxisScale = (seriesList: PaymentSeries[]) => {
     if (!seriesList.length) {
       return 1;
@@ -804,14 +832,6 @@ function App() {
     () => inferAxisScale(plottedSeries),
     [plottedSeries],
   );
-
-  const getAxisId = (series: PaymentSeries) => {
-    if (!useDualMeasureAxes) {
-      return 'left';
-    }
-
-    return series.measureType === 'value' ? 'value' : 'count';
-  };
 
   const timelineRows = useMemo(() => {
     if (!plottedSeries.length) {
@@ -868,7 +888,7 @@ function App() {
   const latestBySeries = useMemo(() => {
     return plottedSeries
       .map((series) => ({
-        label: shortenLabel(series.title),
+        label: shortenLabel(series.title, 26),
         title: series.title,
         units: series.units,
         value: series.points[series.points.length - 1]?.value,
@@ -990,42 +1010,100 @@ function App() {
                 <Typography variant="h6" sx={{ mb: 0.5 }}>Trend Snapshot</Typography>
                 <Typography variant="caption" sx={{ color: 'text.secondary' }}>Track how each series moves over time. Compare trends and spot inflection points across your filtered selection.</Typography>
               </Box>
-              <Box className="chart-wrap">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={timelineRows}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="label" minTickGap={40} />
-                    {useDualMeasureAxes ? (
-                      <>
-                        <YAxis yAxisId="value" width={76} tickFormatter={formatValueAxisTick} />
-                        <YAxis yAxisId="count" orientation="right" width={76} tickFormatter={(value) => formatAxisTick(value, countAxisScale)} />
-                      </>
-                    ) : (
+              {useDualMeasureAxes ? (
+                <>
+                  <Typography variant="overline" sx={{ display: 'block', color: 'text.secondary' }}>Value ($)</Typography>
+                  <Box className="chart-wrap" sx={{ height: 220 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={timelineRows}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="label" minTickGap={40} />
+                        <YAxis yAxisId="left" width={76} tickFormatter={formatValueAxisTick} />
+                        <Tooltip
+                          formatter={(value, name, item) => {
+                            const units = resolveTooltipUnits(String(name), item as { dataKey?: string });
+                            return formatValue(Number(value), units);
+                          }}
+                        />
+                        <Legend />
+                        {valuePlottedSeries.map((series) => (
+                          <Line
+                            key={series.id}
+                            type="monotone"
+                            yAxisId="left"
+                            dataKey={series.id}
+                            name={series.title}
+                            stroke={colorForSeries(series)}
+                            dot={false}
+                            strokeWidth={2}
+                            connectNulls
+                          />
+                        ))}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </Box>
+                  <Typography variant="overline" sx={{ display: 'block', color: 'text.secondary', mt: 2 }}>Volume (count)</Typography>
+                  <Box className="chart-wrap" sx={{ height: 220 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={timelineRows}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="label" minTickGap={40} />
+                        <YAxis yAxisId="left" width={76} tickFormatter={(value) => formatAxisTick(value, countAxisScale)} />
+                        <Tooltip
+                          formatter={(value, name, item) => {
+                            const units = resolveTooltipUnits(String(name), item as { dataKey?: string });
+                            return formatValue(Number(value), units);
+                          }}
+                        />
+                        <Legend />
+                        {countPlottedSeries.map((series) => (
+                          <Line
+                            key={series.id}
+                            type="monotone"
+                            yAxisId="left"
+                            dataKey={series.id}
+                            name={series.title}
+                            stroke={colorForSeries(series)}
+                            dot={false}
+                            strokeWidth={2}
+                            connectNulls
+                          />
+                        ))}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </Box>
+                </>
+              ) : (
+                <Box className="chart-wrap">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={timelineRows}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="label" minTickGap={40} />
                       <YAxis yAxisId="left" width={76} tickFormatter={hasValueSeries ? formatValueAxisTick : (value) => formatAxisTick(value, leftAxisScale)} />
-                    )}
-                    <Tooltip
-                      formatter={(value, name, item) => {
-                        const units = resolveTooltipUnits(String(name), item as { dataKey?: string });
-                        return formatValue(Number(value), units);
-                      }}
-                    />
-                    <Legend />
-                    {plottedSeries.map((series, idx) => (
-                      <Line
-                        key={series.id}
-                        type="monotone"
-                        yAxisId={getAxisId(series)}
-                        dataKey={series.id}
-                        name={series.title}
-                        stroke={SERIES_COLORS[idx % SERIES_COLORS.length]}
-                        dot={false}
-                        strokeWidth={2}
-                        connectNulls
+                      <Tooltip
+                        formatter={(value, name, item) => {
+                          const units = resolveTooltipUnits(String(name), item as { dataKey?: string });
+                          return formatValue(Number(value), units);
+                        }}
                       />
-                    ))}
-                  </LineChart>
-                </ResponsiveContainer>
-              </Box>
+                      <Legend />
+                      {plottedSeries.map((series) => (
+                        <Line
+                          key={series.id}
+                          type="monotone"
+                          yAxisId="left"
+                          dataKey={series.id}
+                          name={series.title}
+                          stroke={colorForSeries(series)}
+                          dot={false}
+                          strokeWidth={2}
+                          connectNulls
+                        />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </Box>
+              )}
               {trendInsight && (
                 <Typography variant="caption" sx={{ mt: 1.5, display: 'block', color: 'text.secondary', fontStyle: 'italic' }}>
                   💡 {trendInsight}
@@ -1052,29 +1130,22 @@ function App() {
                       <AreaChart data={timelineRows}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="label" minTickGap={40} />
-                        {useDualMeasureAxes ? (
-                          <>
-                            <YAxis yAxisId="value" width={76} tickFormatter={formatValueAxisTick} />
-                            <YAxis yAxisId="count" orientation="right" width={76} tickFormatter={formatAxisTick} />
-                          </>
-                        ) : (
-                          <YAxis yAxisId="left" width={76} tickFormatter={hasValueSeries ? formatValueAxisTick : formatAxisTick} />
-                        )}
+                        <YAxis yAxisId="left" width={76} tickFormatter={areaChartIsValueMeasure ? formatValueAxisTick : (value) => formatAxisTick(value, countAxisScale)} />
                         <Tooltip
                           formatter={(value, name, item) => {
                             const units = resolveTooltipUnits(String(name), item as { dataKey?: string });
                             return formatValue(Number(value), units);
                           }}
                         />
-                        {plottedSeries.slice(0, 2).map((series, idx) => (
+                        {areaChartSeries.map((series) => (
                           <Area
                             key={series.id}
                             type="monotone"
-                            yAxisId={getAxisId(series)}
+                            yAxisId="left"
                             dataKey={series.id}
                             name={series.title}
-                            stroke={SERIES_COLORS[idx % SERIES_COLORS.length]}
-                            fill={SERIES_COLORS[idx % SERIES_COLORS.length]}
+                            stroke={colorForSeries(series)}
+                            fill={colorForSeries(series)}
                             fillOpacity={0.25}
                           />
                         ))}
@@ -1107,8 +1178,9 @@ function App() {
                       <BarChart data={latestBySeries} layout="vertical" margin={{ left: 20, right: 12 }}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis type="number" />
-                        <YAxis type="category" dataKey="label" width={220} />
+                        <YAxis type="category" dataKey="label" width={200} interval={0} tick={{ fontSize: 12 }} />
                         <Tooltip
+                          labelFormatter={(_label, payload) => String(payload?.[0]?.payload?.title ?? '')}
                           formatter={(value, _name, item) => {
                             const units = String(item.payload.units ?? '');
                             return formatValue(Number(value), units);
@@ -1451,7 +1523,7 @@ function App() {
                   />
                   {useDualMeasureAxes && (
                     <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mb: 1 }}>
-                      Dual-axis mode is on: values are shown on the left axis, counts on the right axis.
+                      Your selection mixes dollar values and counts, so the trend chart splits into two panels (one per measure) instead of sharing a misleading axis.
                     </Typography>
                   )}
                   <Box sx={{ maxHeight: 260, overflowY: 'auto', pr: 0.5 }}>
@@ -1512,42 +1584,100 @@ function App() {
                   Track how each series moves over time. Compare trends and spot inflection points across your filtered selection.
                 </Typography>
               </Box>
-              <Box className="chart-wrap">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={timelineRows}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="label" minTickGap={40} />
-                    {useDualMeasureAxes ? (
-                      <>
-                        <YAxis yAxisId="value" width={76} tickFormatter={formatValueAxisTick} />
-                        <YAxis yAxisId="count" orientation="right" width={76} tickFormatter={(value) => formatAxisTick(value, countAxisScale)} />
-                      </>
-                    ) : (
+              {useDualMeasureAxes ? (
+                <>
+                  <Typography variant="overline" sx={{ display: 'block', color: 'text.secondary' }}>Value ($)</Typography>
+                  <Box className="chart-wrap" sx={{ height: 220 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={timelineRows}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="label" minTickGap={40} />
+                        <YAxis yAxisId="left" width={76} tickFormatter={formatValueAxisTick} />
+                        <Tooltip
+                          formatter={(value, name, item) => {
+                            const units = resolveTooltipUnits(String(name), item as { dataKey?: string });
+                            return formatValue(Number(value), units);
+                          }}
+                        />
+                        <Legend />
+                        {valuePlottedSeries.map((series) => (
+                          <Line
+                            key={series.id}
+                            type="monotone"
+                            yAxisId="left"
+                            dataKey={series.id}
+                            name={series.title}
+                            stroke={colorForSeries(series)}
+                            dot={false}
+                            strokeWidth={2}
+                            connectNulls
+                          />
+                        ))}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </Box>
+                  <Typography variant="overline" sx={{ display: 'block', color: 'text.secondary', mt: 2 }}>Volume (count)</Typography>
+                  <Box className="chart-wrap" sx={{ height: 220 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={timelineRows}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="label" minTickGap={40} />
+                        <YAxis yAxisId="left" width={76} tickFormatter={(value) => formatAxisTick(value, countAxisScale)} />
+                        <Tooltip
+                          formatter={(value, name, item) => {
+                            const units = resolveTooltipUnits(String(name), item as { dataKey?: string });
+                            return formatValue(Number(value), units);
+                          }}
+                        />
+                        <Legend />
+                        {countPlottedSeries.map((series) => (
+                          <Line
+                            key={series.id}
+                            type="monotone"
+                            yAxisId="left"
+                            dataKey={series.id}
+                            name={series.title}
+                            stroke={colorForSeries(series)}
+                            dot={false}
+                            strokeWidth={2}
+                            connectNulls
+                          />
+                        ))}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </Box>
+                </>
+              ) : (
+                <Box className="chart-wrap">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={timelineRows}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="label" minTickGap={40} />
                       <YAxis yAxisId="left" width={76} tickFormatter={hasValueSeries ? formatValueAxisTick : (value) => formatAxisTick(value, leftAxisScale)} />
-                    )}
-                    <Tooltip
-                      formatter={(value, name, item) => {
-                        const units = resolveTooltipUnits(String(name), item as { dataKey?: string });
-                        return formatValue(Number(value), units);
-                      }}
-                    />
-                    <Legend />
-                    {plottedSeries.map((series, idx) => (
-                      <Line
-                        key={series.id}
-                        type="monotone"
-                        yAxisId={getAxisId(series)}
-                        dataKey={series.id}
-                        name={series.title}
-                        stroke={SERIES_COLORS[idx % SERIES_COLORS.length]}
-                        dot={false}
-                        strokeWidth={2}
-                        connectNulls
+                      <Tooltip
+                        formatter={(value, name, item) => {
+                          const units = resolveTooltipUnits(String(name), item as { dataKey?: string });
+                          return formatValue(Number(value), units);
+                        }}
                       />
-                    ))}
-                  </LineChart>
-                </ResponsiveContainer>
-              </Box>
+                      <Legend />
+                      {plottedSeries.map((series) => (
+                        <Line
+                          key={series.id}
+                          type="monotone"
+                          yAxisId="left"
+                          dataKey={series.id}
+                          name={series.title}
+                          stroke={colorForSeries(series)}
+                          dot={false}
+                          strokeWidth={2}
+                          connectNulls
+                        />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </Box>
+              )}
               {trendInsight && (
                 <Typography variant="caption" sx={{ mt: 1.5, display: 'block', color: 'text.secondary', fontStyle: 'italic' }}>
                   💡 {trendInsight}
@@ -1577,29 +1707,22 @@ function App() {
                   <AreaChart data={timelineRows}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="label" minTickGap={40} />
-                    {useDualMeasureAxes ? (
-                      <>
-                        <YAxis yAxisId="value" width={76} tickFormatter={formatValueAxisTick} />
-                        <YAxis yAxisId="count" orientation="right" width={76} tickFormatter={(value) => formatAxisTick(value, countAxisScale)} />
-                      </>
-                    ) : (
-                      <YAxis yAxisId="left" width={76} tickFormatter={hasValueSeries ? formatValueAxisTick : (value) => formatAxisTick(value, leftAxisScale)} />
-                    )}
+                    <YAxis yAxisId="left" width={76} tickFormatter={areaChartIsValueMeasure ? formatValueAxisTick : (value) => formatAxisTick(value, countAxisScale)} />
                     <Tooltip
                       formatter={(value, name, item) => {
                         const units = resolveTooltipUnits(String(name), item as { dataKey?: string });
                         return formatValue(Number(value), units);
                       }}
                     />
-                    {plottedSeries.slice(0, 2).map((series, idx) => (
+                    {areaChartSeries.map((series) => (
                       <Area
                         key={series.id}
                         type="monotone"
-                        yAxisId={getAxisId(series)}
+                        yAxisId="left"
                         dataKey={series.id}
                         name={series.title}
-                        stroke={SERIES_COLORS[idx % SERIES_COLORS.length]}
-                        fill={SERIES_COLORS[idx % SERIES_COLORS.length]}
+                        stroke={colorForSeries(series)}
+                        fill={colorForSeries(series)}
                         fillOpacity={0.25}
                       />
                     ))}
@@ -1635,8 +1758,9 @@ function App() {
                   <BarChart data={latestBySeries} layout="vertical" margin={{ left: 20, right: 12 }}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis type="number" />
-                    <YAxis type="category" dataKey="label" width={220} />
+                    <YAxis type="category" dataKey="label" width={200} interval={0} tick={{ fontSize: 12 }} />
                     <Tooltip
+                      labelFormatter={(_label, payload) => String(payload?.[0]?.payload?.title ?? '')}
                       formatter={(value, _name, item) => {
                         const units = String(item.payload.units ?? '');
                         return formatValue(Number(value), units);
