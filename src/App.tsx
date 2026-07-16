@@ -269,6 +269,60 @@ function matchesSeriesSearch(series: PaymentSeries, search: string) {
     .every((term) => haystack.includes(term));
 }
 
+const RELEVANCE_STOPWORDS = new Set([
+  'which', 'what', 'when', 'does', 'did', 'the', 'and', 'for', 'with', 'from',
+  'over', 'last', 'has', 'have', 'are', 'was', 'were', 'this', 'that', 'how',
+  'many', 'much', 'per',
+]);
+
+function tokenizeForRelevance(text: string) {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((word) => word.length >= 3 && !RELEVANCE_STOPWORDS.has(word));
+}
+
+// Scores every series against the raw query text so a wrong or missing
+// category/subcategory guess from the classifier can't hide a relevant series -
+// hints only add bonus weight, they never gate out candidates.
+function rankSeriesForQuery(
+  query: string,
+  series: PaymentSeries[],
+  hints: { category?: string; subcategory?: string; measureType?: string; keywords?: string },
+) {
+  const queryTokens = tokenizeForRelevance(query);
+  const keywordTokens = hints.keywords ? tokenizeForRelevance(hints.keywords) : [];
+
+  const scored = series.map((s) => {
+    const titleTokens = new Set(tokenizeForRelevance(s.title));
+    const titleLower = s.title.toLowerCase();
+    let score = 0;
+
+    for (const token of queryTokens) {
+      if (titleTokens.has(token)) score += 3;
+      else if (titleLower.includes(token)) score += 1;
+    }
+
+    for (const token of keywordTokens) {
+      if (titleTokens.has(token)) score += 2;
+      else if (titleLower.includes(token)) score += 1;
+    }
+
+    if (hints.category && s.category === hints.category) score += 2;
+    if (hints.subcategory && s.subcategory === hints.subcategory) score += 3;
+    if (hints.measureType && s.measureType === hints.measureType) score += 1;
+    if (!s.dimensions || Object.keys(s.dimensions).length === 0) score += 1;
+
+    return { series: s, score };
+  });
+
+  return scored
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((entry) => entry.series);
+}
+
 function getNlErrorMessage(status: number, serverError?: string) {
   if (status === 429) {
     return serverError ?? 'NLP is temporarily unavailable because the daily AI quota has been reached. Please try again later, or use the filters below to find the data manually.';
@@ -523,6 +577,22 @@ function App() {
     setSelectedSeries([]);
   };
 
+  // Full category > subcategory taxonomy (unfiltered by current selection), sent to
+  // /api/query so its classifier prompt always matches what's actually in the dataset.
+  const categoryTaxonomy = useMemo(() => {
+    if (!dataset) {
+      return [] as Array<{ category: string; subcategories: string[] }>;
+    }
+
+    const uniqueCategories = Array.from(new Set(dataset.series.map((s) => s.category))).sort();
+    return uniqueCategories.map((cat) => ({
+      category: cat,
+      subcategories: Array.from(
+        new Set(dataset.series.filter((s) => s.category === cat).map((s) => s.subcategory)),
+      ).sort(),
+    }));
+  }, [dataset]);
+
   const handleNlQuery = async (queryText?: string) => {
     const q = (queryText ?? nlQuery).trim();
     if (!q) return;
@@ -535,7 +605,7 @@ function App() {
       const res = await fetch('/api/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: q, datasetVersion: dataset?.generatedAt }),
+        body: JSON.stringify({ query: q, datasetVersion: dataset?.generatedAt, categories: categoryTaxonomy }),
       });
       if (!res.ok) throw new Error(await parseApiError(res));
       const data = await res.json() as {
@@ -577,13 +647,24 @@ function App() {
       setSeriesSearch(effectiveKeywords);
       setNlResult({ explanation: data.explanation });
 
-      // Compute relevant series for the answer using the new filter values
+      // Compute relevant series for the answer by scoring the *entire* dataset against
+      // the raw query text - classifier hints only add bonus weight, so a wrong or
+      // missing category/subcategory guess can no longer hide the right series.
       if (dataset) {
-        const answerCandidates = (effectiveKeywords ? matchesWithKeywords : matchesWithoutKeywords);
-        const aggregateCandidates = answerCandidates
+        const rankedCandidates = rankSeriesForQuery(q, dataset.series, {
+          category: parsedCategory || undefined,
+          subcategory: parsedSubcategory || undefined,
+          measureType: parsedMeasureType || undefined,
+          keywords: requestedKeywords,
+        });
+
+        const fallbackCandidates = effectiveKeywords ? matchesWithKeywords : matchesWithoutKeywords;
+        const aggregateFallback = fallbackCandidates
           .filter((s) => !s.dimensions || Object.keys(s.dimensions).length === 0);
-        const topSeries = (aggregateCandidates.length ? aggregateCandidates : answerCandidates)
-          .slice(0, 10);
+        const topSeries = (rankedCandidates.length
+          ? rankedCandidates
+          : (aggregateFallback.length ? aggregateFallback : fallbackCandidates)
+        ).slice(0, 10);
 
         const dateMin = newFrom ? `${newFrom}-01` : null;
         const dateMax = newTo ? `${newTo}-31` : null;

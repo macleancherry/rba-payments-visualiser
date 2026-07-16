@@ -4,9 +4,15 @@ interface Env {
   AI: Ai;
 }
 
+interface CategoryTaxonomyEntry {
+  category: string;
+  subcategories: string[];
+}
+
 interface QueryRequest {
   query: string;
   datasetVersion?: string;
+  categories?: CategoryTaxonomyEntry[];
 }
 
 interface QueryResponse {
@@ -286,15 +292,34 @@ function classifyAiError(err: unknown): { status: number; body: ErrorResponse } 
   };
 }
 
-const SYSTEM_PROMPT = `Extract filters from a payments-data query and return JSON only.
+// Fallback only - used if the client doesn't send the dataset's actual category
+// taxonomy. Kept in sync with the composite dataset's known sources as of the
+// last manual review; the client-supplied taxonomy is always preferred since it
+// can never go stale.
+const DEFAULT_CATEGORY_TAXONOMY: CategoryTaxonomyEntry[] = [
+  { category: 'Cards', subcategories: ['Credit and Charge', 'Debit', 'Prepaid'] },
+  { category: 'Cash and ATM', subcategories: ['ATM Withdrawals'] },
+  { category: 'Cheques', subcategories: ['Cheques'] },
+  { category: 'Account-to-Account', subcategories: ['Direct Credit', 'Direct Debit', 'Direct Entry', 'NPP', 'PayTo'] },
+  { category: 'High Value', subcategories: ['RTGS'] },
+  { category: 'Infrastructure', subcategories: ['Device Statistics', 'Banking service presence'] },
+  { category: 'Fraud', subcategories: ['Cards', 'Cheques', 'Scheme cards', 'Overseas cards'] },
+  { category: 'Consumer Behaviour', subcategories: ['Consumer Payments Survey - All', 'Consumer Payments Survey - Age', 'Consumer Payments Survey - Income', 'Consumer Payments Survey - Region', 'Consumer Payments Survey - Payment size', 'Consumer Payments Survey - Payment purpose'] },
+  { category: 'Site Usage', subcategories: ['Productivity', 'Caching', 'AI Cost'] },
+];
+
+function buildCategoryBlock(taxonomy?: CategoryTaxonomyEntry[]) {
+  const entries = taxonomy?.length ? taxonomy : DEFAULT_CATEGORY_TAXONOMY;
+  return entries
+    .map((entry) => `- ${entry.category} > ${entry.subcategories.join(' | ')}`)
+    .join('\n');
+}
+
+function buildSystemPrompt(taxonomy?: CategoryTaxonomyEntry[]) {
+  return `Extract filters from a payments-data query and return JSON only.
 
 Categories:
-- Cards > Credit and Charge | Debit | Prepaid
-- Cash and ATM > ATM Withdrawals
-- Cheques > Cheques
-- Account-to-Account > Direct Credit | Direct Debit | Direct Entry | NPP | PayTo
-- High Value > RTGS
-- Site Usage > Productivity | Caching | AI Cost
+${buildCategoryBlock(taxonomy)}
 
 Measure types: value | volume | accounts | other
 
@@ -306,6 +331,7 @@ JSON schema:
 {"category":string|null,"subcategory":string|null,"measureType":string|null,"timeRange":string|null,"dateFrom":string|null,"dateTo":string|null,"keywords":string|null,"explanation":string}
 
 keywords should only be a specific series phrase not already represented by category/subcategory/measure/date; otherwise null.`;
+}
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   try {
@@ -345,7 +371,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     const response = await runQueryModel(context.env.AI, [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: buildSystemPrompt(body?.categories) },
       { role: 'user', content: query },
     ]);
     const tokenUsage = extractTokenUsage(response);
