@@ -46,6 +46,11 @@ import { differenceInCalendarDays, format, parseISO, subYears } from 'date-fns';
 
 type MeasureType = 'value' | 'volume' | 'accounts' | 'other';
 type RangeOption = '2Y' | '5Y' | '10Y' | 'ALL';
+const RANGE_OPTIONS: readonly RangeOption[] = ['2Y', '5Y', '10Y', 'ALL'];
+
+function isRangeOption(value: unknown): value is RangeOption {
+  return typeof value === 'string' && (RANGE_OPTIONS as readonly string[]).includes(value);
+}
 
 type SeriesPoint = {
   date: string;
@@ -639,10 +644,10 @@ function App() {
       if (newFrom || newTo) {
         setCustomFrom(newFrom);
         setCustomTo(newTo);
-      } else if (data.timeRange) {
+      } else if (isRangeOption(data.timeRange)) {
         setCustomFrom(null);
         setCustomTo(null);
-        setTimeRange(data.timeRange as RangeOption);
+        setTimeRange(data.timeRange);
       }
       setSeriesSearch(effectiveKeywords);
       setNlResult({ explanation: data.explanation });
@@ -930,7 +935,7 @@ function App() {
     if (customFrom || customTo) {
       minDate = customFrom ? `${customFrom}-01` : null;
       maxDate = customTo ? `${customTo}-31` : null;
-    } else if (timeRange !== 'ALL') {
+    } else if (timeRange !== 'ALL' && timeRange in RANGE_YEARS) {
       minDate = format(subYears(new Date(), RANGE_YEARS[timeRange as Exclude<RangeOption, 'ALL'>]), 'yyyy-MM-01');
     }
 
