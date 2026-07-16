@@ -914,6 +914,22 @@ function App() {
     return unitsBySeriesTitle.get(name) ?? 'Number';
   };
 
+  const latestDataDate = useMemo(() => {
+    if (!dataset) {
+      return null;
+    }
+
+    let latest: string | null = null;
+    dataset.series.forEach((series) => {
+      const lastPoint = series.points[series.points.length - 1];
+      if (lastPoint && (!latest || lastPoint.date > latest)) {
+        latest = lastPoint.date;
+      }
+    });
+
+    return latest;
+  }, [dataset]);
+
   const quickStats = useMemo(() => {
     if (!dataset) {
       return [];
@@ -1214,7 +1230,9 @@ function App() {
         </Typography>
         <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
           <Chip label={`${dataset.series.length} data series`} sx={{ backgroundColor: 'rgba(255, 255, 255, 0.15)', color: '#ffffff' }} />
-          <Chip label={`Latest: ${format(parseISO(dataset.generatedAt), 'dd MMM yyyy')}`} sx={{ backgroundColor: 'rgba(255, 255, 255, 0.15)', color: '#ffffff' }} />
+          {latestDataDate && (
+            <Chip label={`Latest data: ${format(parseISO(latestDataDate), 'MMM yyyy')}`} sx={{ backgroundColor: 'rgba(255, 255, 255, 0.15)', color: '#ffffff' }} />
+          )}
           <Chip label="By Mac Cherry - Head of Payments @ Fat Zebra" sx={{ backgroundColor: 'rgba(255, 255, 255, 0.15)', color: '#ffffff' }} />
           {usageStats && (
             <Chip
