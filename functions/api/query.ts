@@ -22,6 +22,8 @@ interface QueryResponse {
   timeRange: string | null;
   dateFrom: string | null;
   dateTo: string | null;
+  relativeAmount: number | null;
+  relativeUnit: string | null;
   keywords: string | null;
   explanation: string;
 }
@@ -240,6 +242,8 @@ function buildSafeFallbackResponse(query: string): QueryResponse {
     timeRange: null,
     dateFrom: null,
     dateTo: null,
+    relativeAmount: null,
+    relativeUnit: null,
     keywords: null,
     explanation: 'General payments query',
   };
@@ -323,12 +327,19 @@ ${buildCategoryBlock(taxonomy)}
 
 Measure types: value | volume | accounts | other
 
-Use either timeRange OR dateFrom/dateTo:
-- timeRange: 2Y | 5Y | 10Y | ALL
-- dates: YYYY-MM
+Use exactly one of these three ways to express a time period - never guess actual
+calendar dates yourself, since you don't reliably know today's date:
+- A RELATIVE period ("last 6 months", "past 2 years", "last 90 days" rounded to
+  the nearest month): set relativeAmount (integer) and relativeUnit ("months" or
+  "years"). The app computes the real dates from today's actual date - do not also
+  set dateFrom/dateTo/timeRange for these.
+- An ABSOLUTE period with a specific year/month named in the query ("since 2022",
+  "in March 2024", "2020 to 2023"): set dateFrom/dateTo as YYYY-MM.
+- A vague/unspecified-length lookback ("recent trend", "historically") with no
+  explicit number: use timeRange: 2Y | 5Y | 10Y | ALL.
 
 JSON schema:
-{"category":string|null,"subcategory":string|null,"measureType":string|null,"timeRange":string|null,"dateFrom":string|null,"dateTo":string|null,"keywords":string|null,"explanation":string}
+{"category":string|null,"subcategory":string|null,"measureType":string|null,"timeRange":string|null,"dateFrom":string|null,"dateTo":string|null,"relativeAmount":number|null,"relativeUnit":string|null,"keywords":string|null,"explanation":string}
 
 keywords should only be a specific series phrase not already represented by category/subcategory/measure/date; otherwise null.`;
 }

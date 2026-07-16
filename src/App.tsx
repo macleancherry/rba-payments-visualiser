@@ -42,7 +42,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { differenceInCalendarDays, format, parseISO, subYears } from 'date-fns';
+import { differenceInCalendarDays, format, parseISO, subMonths, subYears } from 'date-fns';
 
 type MeasureType = 'value' | 'volume' | 'accounts' | 'other';
 type RangeOption = '2Y' | '5Y' | '10Y' | 'ALL';
@@ -616,6 +616,7 @@ function App() {
       const data = await res.json() as {
         category?: string | null; subcategory?: string | null; measureType?: string | null;
         timeRange?: string | null; dateFrom?: string | null; dateTo?: string | null;
+        relativeAmount?: number | null; relativeUnit?: string | null;
         keywords?: string | null; explanation: string;
       };
 
@@ -627,8 +628,26 @@ function App() {
       const newSubcategory = parsedSubcategory || 'All';
       const newMeasureType = (parsedMeasureType || 'All') as 'All' | MeasureType;
       const requestedKeywords = data.keywords?.trim() ?? '';
-      const newFrom = (data.dateFrom || data.dateTo) ? (data.dateFrom ?? null) : null;
-      const newTo = (data.dateFrom || data.dateTo) ? (data.dateTo ?? null) : null;
+
+      // A relative period ("last 6 months") is computed here from the real current
+      // date rather than trusted from the model - LLMs are unreliable at date
+      // arithmetic, so it only needs to extract the amount/unit, not the actual dates.
+      const relativeUnit = data.relativeUnit === 'months' || data.relativeUnit === 'years' ? data.relativeUnit : null;
+      const relativeAmount = Number.isFinite(data.relativeAmount) && Number(data.relativeAmount) > 0
+        ? Math.round(Number(data.relativeAmount))
+        : null;
+
+      let newFrom: string | null = null;
+      let newTo: string | null = null;
+      if (relativeUnit && relativeAmount) {
+        const startDate = relativeUnit === 'years'
+          ? subYears(new Date(), relativeAmount)
+          : subMonths(new Date(), relativeAmount);
+        newFrom = format(startDate, 'yyyy-MM');
+      } else if (data.dateFrom || data.dateTo) {
+        newFrom = data.dateFrom ?? null;
+        newTo = data.dateTo ?? null;
+      }
       const matchesWithKeywords = getSeriesMatches(newCategory, newSubcategory, newMeasureType, requestedKeywords);
       const matchesWithoutKeywords = getSeriesMatches(newCategory, newSubcategory, newMeasureType, '');
       const effectiveKeywords = requestedKeywords && matchesWithKeywords.length > 0 ? requestedKeywords : '';
